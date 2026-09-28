@@ -41,7 +41,8 @@ def read(field):
     raise RuntimeError('No ASCII reply for '+field)
 def number(field):
     value=float(read(field))
-    if not math.isfinite(value):raise RuntimeError('Non-finite '+field)
+    if not math.isfinite(value) and not (field.endswith('.motor.config.torque_lim') and value==math.inf):
+        raise RuntimeError('Non-finite '+field)
     return value
 try:
     tty.setraw(fd)
