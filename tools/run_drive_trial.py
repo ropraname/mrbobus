@@ -17,7 +17,7 @@ import tarfile
 import io
 
 p=argparse.ArgumentParser(description=__doc__)
-p.add_argument('--profile', default='low_i', help='Named entry in config/tuning.yaml')
+p.add_argument('--profile', default='baseline', help='Named entry in config/tuning.yaml')
 p.add_argument('--current-limit', type=float, default=3.)
 p.add_argument('--arc-pair', action='store_true')
 p.add_argument('--turn-pair', action='store_true')

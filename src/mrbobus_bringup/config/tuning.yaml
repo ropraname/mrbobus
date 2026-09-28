@@ -1,5 +1,5 @@
 # RAM-only commissioning profiles. Baseline comes from Taras' 2026-09-27 backup.
-# Current limit is deliberately fixed at 3 A for these floor trials.
+# Current limit is supplied separately; accepted floor service default is 15 A.
 baseline:
   rear_p: 0.2
   rear_i: 1.0

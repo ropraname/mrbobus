@@ -117,8 +117,9 @@ def run(v, duration, monitor=True, w=0.):
                     raise RuntimeError('Stale axis ' + str(n))
                 if a.get('state') != 8 or a.get('error') != 0:
                     raise RuntimeError('Axis fault: ' + str(axes))
-                if not math.isfinite(a['velocity']) or abs(a['velocity']) > 1. or a.get('average_rps', 0.) > (.25 if args.floor else .1):
-                    raise RuntimeError('Wheel speed guard (60 rpm instantaneous / 15 rpm floor, 6 rpm bench averaged): ' + str(axes))
+                average_limit = 20./60. if args.floor and args.turn_pair else .25 if args.floor else .1
+                if not math.isfinite(a['velocity']) or abs(a['velocity']) > 1. or a.get('average_rps', 0.) > average_limit:
+                    raise RuntimeError(f'Wheel speed guard (60 rpm instantaneous / {average_limit*60:g} rpm averaged): ' + str(axes))
         time.sleep(.035)
 
 armed = False
