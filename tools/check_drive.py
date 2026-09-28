@@ -21,9 +21,11 @@ mode.add_argument('--floor', action='store_true')
 mode.add_argument('--stop-check', action='store_true')
 parser.add_argument('--output', default='/tmp/mrbobus-drive-samples.json')
 parser.add_argument('--reverse', action='store_true')
+parser.add_argument('--speed', type=float, default=.03)
 parser.add_argument('--distance', type=float, default=.5)
 args = parser.parse_args()
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+if not math.isfinite(args.speed) or not 0 < args.speed <= .06: raise SystemExit('Speed must be in (0, 0.06] m/s')
 if not 0 < args.distance <= .5: raise SystemExit('Distance must be in (0, 0.5] m')
 if os.environ.get('ROS_DOMAIN_ID') != '42':
     raise SystemExit('Requires robot ROS_DOMAIN_ID=42')
@@ -154,7 +156,7 @@ try:
             direction=-1. if args.reverse else 1.
             remaining=args.distance-direction*latest['odom'].pose.pose.position.x
             if remaining <= .005: break
-            run(direction*min(.03, math.sqrt(2*.025*max(0.,remaining-.005))), .04)
+            run(direction*min(args.speed, math.sqrt(2*.025*max(0.,remaining-.005))), .04)
         else: raise RuntimeError('Floor test 30 s timeout')
     else: run(.007, 5.)
     run(0., 2.)

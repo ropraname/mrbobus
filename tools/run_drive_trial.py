@@ -18,6 +18,7 @@ import io
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--profile', default='low_i', help='Named entry in config/tuning.yaml')
+p.add_argument('--speed', type=float, default=.03)
 p.add_argument('--distance', type=float, default=.25)
 p.add_argument('--reverse', action='store_true')
 p.add_argument('--check', action='store_true', help='Sync and check readiness; never activate motors')
@@ -25,6 +26,7 @@ p.add_argument('--host', default='taras@mrbobus.local')
 p.add_argument('--ssh-control', default='/tmp/mrbobus-audit/ssh-control')
 a=p.parse_args()
 if not re.fullmatch(r'[a-z][a-z0-9_]{0,31}',a.profile):p.error('Invalid profile name')
+if not math.isfinite(a.speed) or not 0<a.speed<=.06:p.error('Speed must be in (0,0.06] m/s')
 if not math.isfinite(a.distance) or not 0<a.distance<=.5:p.error('Distance must be in (0,0.5] m')
 root=Path(__file__).resolve().parent.parent
 ssh=['ssh','-S',a.ssh_control,a.host]
@@ -45,7 +47,7 @@ shutil.copy2(root/'src/mrbobus_bringup/config/tuning.yaml',out/'tuning.yaml')
 shutil.copy2(root/'src/mrbobus_bringup/config/floor.yaml',out/'floor.yaml')
 remote_out=remote+'/log/trials/'+trial
 script='''set -euo pipefail
-profile=$1; distance=$2; direction=$3; output=$4
+profile=$1; distance=$2; direction=$3; output=$4; speed=$5
 if [[ $(cat /run/mrbobus-stop/enabled) != 1 ]]; then
   echo 'STOP is latched. Trial refused; unblock explicitly in the browser.' >&2; exit 73
 fi
@@ -66,15 +68,15 @@ set -u
 export ROS_DOMAIN_ID=42 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export CYCLONEDDS_URI=file:///home/taras/robot/ros2_ws/deploy/cyclone-pi.xml
 extra=(); [[ "$direction" == reverse ]] && extra+=(--reverse)
-python3 /home/taras/robot/mrbobus_ws/tools/check_drive.py --floor --distance "$distance" "${extra[@]}" --output "$output/samples.json"
+python3 /home/taras/robot/mrbobus_ws/tools/check_drive.py --floor --distance "$distance" --speed "$speed" "${extra[@]}" --output "$output/samples.json"
 '''
-args=['bash','-s','--',a.profile,str(a.distance),'reverse' if a.reverse else 'forward',remote_out]
-print(f'Trial {trial}: {a.distance:g} m. STOP remains available.',flush=True)
+args=['bash','-s','--',a.profile,str(a.distance),'reverse' if a.reverse else 'forward',remote_out,str(a.speed)]
+print(f'Trial {trial}: {a.distance:g} m at {a.speed:g} m/s. STOP remains available.',flush=True)
 result=subprocess.run(ssh+[shlex.join(args)],input=script,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 (out/'run.log').write_text(result.stdout)
 if result.returncode: print(result.stdout)
 subprocess.run(['scp','-q','-r','-o','ControlPath='+a.ssh_control,a.host+':'+remote_out+'/.',str(out)],check=False)
-(out/'trial.json').write_text(json.dumps({'profile':a.profile,'distance':a.distance,'reverse':a.reverse,'exit_code':result.returncode},indent=2))
+(out/'trial.json').write_text(json.dumps({'profile':a.profile,'distance':a.distance,'speed':a.speed,'reverse':a.reverse,'exit_code':result.returncode},indent=2))
 summary_path=out/'samples.summary.json'
 if summary_path.exists():
     summary=json.loads(summary_path.read_text())
