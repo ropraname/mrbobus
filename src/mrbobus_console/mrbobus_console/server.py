@@ -123,7 +123,7 @@ class Console(Node):
                 deadline=time.monotonic()+12
                 while time.monotonic()<deadline:
                     self.gate.check_epoch(epoch)
-                    result=self.call(self.list_client,ListControllers.Request(),3)
+                    result=self.call(self.list_client,ListControllers.Request(),max(.1,deadline-time.monotonic()))
                     state=next((x.state for x in result.controller if x.name=='diff_drive_controller'),None)
                     if state=='inactive':break
                     time.sleep(.1)
