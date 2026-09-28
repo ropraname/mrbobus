@@ -107,7 +107,7 @@ CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::Hardwa
         current_limit_ = get("current_limit", 1.);
         pace_us_ = static_cast<int>(get("tx_spacing_us", 1500));
         if (!std::isfinite(feedback_timeout_) || feedback_timeout_ <= 0. ||
-            !std::isfinite(current_limit_) || current_limit_ <= 0. || current_limit_ > 15. ||
+            !std::isfinite(current_limit_) || current_limit_ <= 0. || current_limit_ > 20. ||
             !std::isfinite(max_velocity_) || max_velocity_ <= 0. || pace_us_ < 0 || pace_us_ > 5000)
             throw std::runtime_error("Invalid hardware parameters");
         std::set<uint32_t> ids;

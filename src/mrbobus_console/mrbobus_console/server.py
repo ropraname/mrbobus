@@ -7,6 +7,7 @@ from urllib.request import Request,urlopen
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.time import Time
 from rclpy.qos import qos_profile_sensor_data
 from geometry_msgs.msg import TwistStamped
@@ -15,6 +16,8 @@ from sensor_msgs.msg import PointCloud2,CompressedImage
 from controller_manager_msgs.srv import ListControllers,SwitchController
 from tf2_ros import Buffer,TransformListener
 from .control import MotionGate
+from .field_map import FieldMap
+from .navigation import Navigation
 
 ROOT=Path('/home/taras/robot/mrbobus_ws')
 STOP_URL='http://192.168.67.149:8081'
@@ -31,11 +34,13 @@ def transform_matrix(t):return matrix(t.transform.translation,t.transform.rotati
 class Console(Node):
     def __init__(self,args):
         super().__init__('mrbobus_console');self.args=args;self.gate=MotionGate();self.lock=threading.RLock();self.operation=threading.Lock();self.running=True
+        self.field_map=FieldMap('/home/taras/robot/records/maps/field-20260928');self.iq={}
         self.pose=None;self.pose_source=None;self.pose_time=0.;self.pose_matrix=None;self.lio_time=0.;self.wheel_pose=None
         self.cloud_frames=[];self.cloud_stats={};self.points=[];self.cloud_time=0.;self.cloud_processed=0.;self.cloud_hz=0.;self.previous_cloud=None;self.trace=[];self.axes={};self.voltage={}
         self.jpeg=None;self.camera_time=0.;self.camera_error='Подключение камеры';self.camera_process=None;self.lio_process=None;self.recorder=None
         self.session=datetime.now().strftime('field-%Y%m%d-%H%M%S');self.folder=Path(args.records)/self.session;self.marks=[];self.segment=0;self.record_error=None
         self.pub=self.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
+        self.navigation=Navigation(self)
         self.camera_pub=self.create_publisher(CompressedImage,'/camera/image/compressed',qos_profile_sensor_data)
         self.tf=Buffer();self.listener=TransformListener(self.tf,self)
         self.subs=[self.create_subscription(PointCloud2,'/unilidar/cloud',self.cloud,qos_profile_sensor_data),self.create_subscription(Odometry,'/lio/odometry',self.lio,qos_profile_sensor_data),self.create_subscription(Odometry,'/odom',self.wheel,qos_profile_sensor_data)]
@@ -74,6 +79,7 @@ class Console(Node):
             raw=len(p);p=p[np.isfinite(p).all(axis=1)]
             radius=np.linalg.norm(p,axis=1);p=p[(radius>.3)&(radius<8)]
             t=transform_matrix(self.tf.lookup_transform('base_link',msg.header.frame_id,Time()));p=p@t[:3,:3].T+t[:3,3]
+            self.navigation.scan(p,msg.header.stamp)
             # Show below the chassis too: the robot may stand on a table or ramp.
             p=p[(p[:,2]>-2.5)&(p[:,2]<3)]
             with self.lock:
@@ -105,7 +111,7 @@ class Console(Node):
     def zero(self):
         msg=TwistStamped();msg.header.stamp=self.get_clock().now().to_msg();self.pub.publish(msg)
     def stop(self):
-        self.gate.stop();self.zero();stop_request('/stop')
+        self.navigation.cancel();self.gate.stop();self.zero();stop_request('/stop')
         return {'ok':True}
     def arm(self,owner):
         with self.operation:
@@ -117,7 +123,7 @@ class Console(Node):
                 result=subprocess.run(['python3',str(ROOT/'tools/read_bus.py')],capture_output=True,text=True,timeout=3)
                 if result.returncode:raise ValueError('Проверка осей/питания не пройдена: '+result.stdout[-160:]+result.stderr[-160:])
                 self.gate.check_epoch(epoch)
-                Path('/run/mrbobus-stop/control.env').write_text('DRIVE_GAIN_PROFILE=baseline\nDRIVE_CURRENT_LIMIT=15\n')
+                Path('/run/mrbobus-stop/control.env').write_text('DRIVE_GAIN_PROFILE=baseline\nDRIVE_CURRENT_LIMIT=20\n')
                 stop_request('/ready');self.gate.check_epoch(epoch)
                 subprocess.run(['sudo','-n','systemctl','start','mrbobus-control'],check=True,timeout=6)
                 deadline=time.monotonic()+12
@@ -136,6 +142,7 @@ class Console(Node):
                 self.stop();raise
     def command(self,data):
         with self.gate.lock:
+            self.navigation.cancel()
             v,w=self.gate.command(data.get('client'),data.get('v',0),data.get('w',0),data.get('seq'))
             if Path('/run/mrbobus-stop/enabled').read_text().strip()!='1':raise ValueError('STOP зафиксирован')
             with self.lock:
@@ -180,13 +187,25 @@ class Console(Node):
             with (self.folder/'landmarks.jsonl').open('a') as f:f.write(json.dumps(mark,ensure_ascii=False)+'\n')
             self.marks.append(mark)
         return {'ok':True,'mark':mark}
+    def map_action(self,action,data):
+        if action=='navigate':return self.navigation.navigate(data)
+        if action=='goal':return self.field_map.goal(data)
+        if action=='remove':return self.field_map.remove(data)
+        with self.gate.lock:
+            if self.gate.active:raise ValueError('Для установки позы/совмещения нажми STOP')
+            with self.lock:
+                if self.pose_source!='LIO' or time.monotonic()-self.pose_time>.5:raise ValueError('Нет свежей LIO-позы')
+                current=self.pose_matrix.copy();cloud=list(self.points)
+            if action=='pose':return self.field_map.set_pose(data,current)
+            if action=='refine':return self.field_map.refine(cloud,current)
+        raise ValueError('Неизвестное действие карты')
     def status(self):
         now=time.monotonic()
         try:ready=Path('/run/mrbobus-stop/enabled').read_text().strip()=='1'
         except OSError:ready=False
         with self.gate.lock,self.lock:
             active=self.gate.active and ready and len(self.axes)==4 and all(x['state']==8 and x['error']==0 and now-x['at']<.5 for x in self.axes.values())
-            return {'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
+            return {'navigation':{'active':self.navigation.active,'message':self.navigation.message,'path':self.navigation.path},'map':self.field_map.status(self.pose_matrix,self.pose_source=='LIO' and now-self.pose_time<.5),'iq':{k:{**v,'age':now-v['at']} for k,v in self.iq.items()},'current_limit':20,'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
     def camera(self):
         command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','640x480','-framerate','30','-i',self.args.camera,'-vf','fps=5,hflip','-c:v','mjpeg','-q:v','3','-threads','1','-f','image2pipe','pipe:1']
         while self.running:
@@ -218,6 +237,7 @@ class Console(Node):
                 if n not in range(4):continue
                 with self.lock:
                     if cmd==1:self.axes[str(n)]={'state':data[4],'error':struct.unpack_from('<I',data)[0],'at':time.monotonic()}
+                    elif cmd==20:self.iq[str(n)]={'target':struct.unpack_from('<f',data)[0],'measured':struct.unpack_from('<f',data,4)[0],'at':time.monotonic()}
                     elif cmd==23:self.voltage[str(n)]=(struct.unpack_from('<f',data)[0],time.monotonic())
             s.close()
         except OSError:pass
@@ -229,7 +249,7 @@ class Console(Node):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--address',default='192.168.67.149');p.add_argument('--port',type=int,default=8080);p.add_argument('--camera',default='/dev/video0');p.add_argument('--records',default='/home/taras/robot/records');p.add_argument('--web',default=str(ROOT/'src/mrbobus_console/web'));args=p.parse_args()
-    rclpy.init();node=Console(args);threading.Thread(target=rclpy.spin,args=(node,),daemon=True).start();node.start_lio();origin=f'http://{args.address}:{args.port}'
+    rclpy.init();node=Console(args);executor=SingleThreadedExecutor();executor.add_node(node);spin_thread=threading.Thread(target=executor.spin,daemon=True);spin_thread.start();node.start_lio();origin=f'http://{args.address}:{args.port}'
     class Handler(BaseHTTPRequestHandler):
         protocol_version='HTTP/1.1'
         def log_message(self,*args):pass
@@ -239,11 +259,12 @@ def main():
             except (BrokenPipeError,ConnectionResetError):pass
         def do_GET(self):
             path=self.path.split('?')[0]
-            if path in ('/','/app.js','/style.css'):
-                name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[path];content={'/':'text/html; charset=utf-8','/app.js':'text/javascript','/style.css':'text/css'}[path];self.reply(200,(Path(args.web)/name).read_bytes(),content)
+            if path in ('/','/app.js','/map.js','/style.css'):
+                name={'/':'index.html','/app.js':'app.js','/map.js':'map.js','/style.css':'style.css'}[path];content={'/':'text/html; charset=utf-8','/app.js':'text/javascript','/map.js':'text/javascript','/style.css':'text/css'}[path];self.reply(200,(Path(args.web)/name).read_bytes(),content)
+            elif path=='/api/map':self.reply(200,node.field_map.data) if node.field_map.data else self.reply(404,{'error':'Нет карты'})
             elif path=='/api/status':self.reply(200,node.status())
             elif path=='/api/cloud':
-                with node.lock:result={'points':node.points,'pose':node.pose,'source':node.pose_source,'stats':node.cloud_stats,'age':time.monotonic()-node.cloud_time if node.cloud_time else None}
+                with node.lock:result={'points':node.points[::3] if node.gate.active else node.points,'pose':node.pose,'source':node.pose_source,'stats':node.cloud_stats,'age':time.monotonic()-node.cloud_time if node.cloud_time else None}
                 self.reply(200,result)
             elif path=='/camera.jpg':
                 with node.lock:image=node.jpeg
@@ -256,7 +277,8 @@ def main():
                 if not 0<size<=2048:raise ValueError('Invalid request')
                 data=json.loads(self.rfile.read(size))
                 if not isinstance(data,dict):raise ValueError('JSON object required')
-                if self.path=='/api/stop':result=node.stop()
+                if self.path.startswith('/api/map/') :result=node.map_action(self.path.rsplit('/',1)[-1],data)
+                elif self.path=='/api/stop':result=node.stop()
                 elif self.path=='/api/arm':result=node.arm(data.get('client'))
                 elif self.path=='/api/cmd':result=node.command(data)
                 elif self.path=='/api/record':result=node.record(data.get('enabled') is True)
@@ -273,5 +295,5 @@ def main():
     signal.signal(signal.SIGTERM,shutdown)
     try:server.serve_forever(poll_interval=.1)
     except KeyboardInterrupt:pass
-    finally:server.server_close();node.close();node.destroy_node();rclpy.shutdown()
+    finally:server.server_close();node.close();executor.shutdown(timeout_sec=2);spin_thread.join(timeout=2);node.destroy_node();rclpy.shutdown()
 if __name__=='__main__':main()

@@ -1,0 +1,14 @@
+[Unit]
+Description=Mrbobus Nav2 field navigation
+After=mrbobus-console.service
+Requires=mrbobus-console.service
+[Service]
+User=taras
+Environment=ROS_DOMAIN_ID=42
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/taras/robot/ros2_ws/deploy/cyclone-pi.xml
+ExecStart=/bin/bash /home/taras/robot/mrbobus_ws/deploy/start-navigation.sh
+KillSignal=SIGINT
+TimeoutStopSec=15
+[Install]
+WantedBy=multi-user.target

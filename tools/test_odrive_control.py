@@ -30,7 +30,8 @@ if fault_kind=='stop':stop_path.write_text('1')
 sock=socket.socket(socket.AF_CAN,socket.SOCK_RAW,socket.CAN_RAW)
 sock.bind(('vcan0',));sock.settimeout(.002)
 state={n:1 for n in range(4)}; error={n:2048 for n in state}
-gains={}
+gains={};limits={}
+test_current=float(os.environ.get("MRBOBUS_TEST_CURRENT_LIMIT","1.0"))
 velocity={n:0. for n in state};position=dict(velocity)
 last_rx={n:time.monotonic() for n in state}; silent=set()
 peak={n:0. for n in state}; counts={n:0 for n in state}
@@ -62,6 +63,7 @@ def simulate():
         elif cmd==13:
             velocity[n]=struct.unpack_from('<f',data)[0]
             peak[n]=max(peak[n],abs(velocity[n]));counts[n]+=1
+        elif cmd==15:limits[n]=struct.unpack('<ff',data)
         elif cmd==24:error[n]=0
         elif cmd==27:gains[n]=struct.unpack('<ff',data)
 
@@ -72,7 +74,7 @@ subs=[node.create_subscription(Odometry,'/odom',lambda m:latest.update(odom=m),1
 pub=node.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
 clients={k:node.create_client(t,'/controller_manager/'+k) for k,t in [('list_controllers',ListControllers),('switch_controller',SwitchController)]}
 log_path=Path('/tmp/mrbobus-odrive-vcan.log');log=log_path.open('w')
-proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0','gain_profile:='+('soft' if fault_kind=='soft' else 'existing')] + (['stop_file:='+str(stop_path)] if fault_kind=='stop' else []),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0','current_limit:='+str(test_current),'gain_profile:='+('soft' if fault_kind=='soft' else 'existing')] + (['stop_file:='+str(stop_path)] if fault_kind=='stop' else []),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
 
 def wait_for(predicate,timeout=10.):
     end=time.monotonic()+timeout
@@ -104,6 +106,7 @@ try:
     if fault_kind=='soft':
         assert all(abs(gains[n][0]-(.05 if n<2 else .0265))<1e-6 for n in range(4)),gains
     drive(.01,0.,3.)
+    assert len(limits)==4 and all(abs(v[1]-test_current)<1e-5 for v in limits.values()),limits
     wait_for(lambda:'odom' in latest and latest['odom'].pose.pose.position.x>.01)
     assert velocity[0]>0 and velocity[3]>0 and velocity[1]<0 and velocity[2]<0,velocity
     assert max(peak.values()) <= .1+1e-5,peak
