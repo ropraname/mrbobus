@@ -1,10 +1,11 @@
 'use strict';
 const $=id=>document.getElementById(id), client=sessionStorage.consoleClient||(sessionStorage.consoleClient=(crypto.randomUUID?crypto.randomUUID():Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join(''))), held=new Set();
-let state={},points=[],scenePose=null, cameraVisible=true,armBusy=false,cmdBusy=false,seq=0,lastV=0,lastW=0,lastMessage=0;
+let state={},points=[],scenePose=null, cameraVisible=true,armBusy=false,cmdBusy=false,seq=Number(sessionStorage.consoleSeq||0),lastV=0,lastW=0,lastMessage=0;
 function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);lastMessage=Date.now()}
 async function api(path,data={}){const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,client}),signal:AbortSignal.timeout(path==='arm'?25000:12000)});const j=await r.json();if(!r.ok)throw Error(j.error||'Ошибка запроса');return j}
 function moving(){const speed=Number($('speed').value)/100;return [((held.has('forward')?1:0)-(held.has('back')?1:0))*speed,((held.has('left')?1:0)-(held.has('right')?1:0))*.3]}
-async function sendCommand(force=false){const [v,w]=moving();if(!state.active||state.owner!==client)return;if(cmdBusy&&!force)return;if(!force&&!v&&!w&&!lastV&&!lastW)return;cmdBusy=true;lastV=v;lastW=w;try{await api('cmd',{v,w,seq:++seq})}catch(e){if(Date.now()-lastMessage>2500)message(e.message,true)}finally{cmdBusy=false}}
+function nextSequence(){seq=Math.max(seq+1,Date.now()*1000);sessionStorage.consoleSeq=String(seq);return seq}
+async function sendCommand(force=false){const [v,w]=moving();if(!state.active||state.owner!==client)return;if(cmdBusy&&!force)return;if(!force&&!v&&!w&&!lastV&&!lastW)return;cmdBusy=true;lastV=v;lastW=w;try{await api('cmd',{v,w,seq:nextSequence()})}catch(e){if(Date.now()-lastMessage>2500)message(e.message,true)}finally{cmdBusy=false}}
 function neutral(){held.clear();highlight();sendCommand(true)}
 function highlight(){document.querySelectorAll('[data-dir]').forEach(b=>b.classList.toggle('pressed',held.has(b.dataset.dir)))}
 async function stop(){held.clear();lastV=lastW=0;highlight();state.active=false;try{await api('stop');message('STOP зафиксирован. Для продолжения снова включи привод.')}catch(e){message('Нет ответа от GUI. Открой отдельный STOP по ссылке сверху.',true)}}
