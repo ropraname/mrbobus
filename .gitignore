@@ -1,0 +1,14 @@
+.local/
+build/
+install/
+log/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.DS_Store
+.env
+secrets/
+*.bag
+*.mcap
+*.db3

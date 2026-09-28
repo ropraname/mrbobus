@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- CAD: BOX_TANK_0.2_LIGHT.step 2026-09-26. Simplified visuals, not collision certification.
+     base_link at wheel-centre rectangle centre (CAD 99.876919845,-120.848277258,-0.04 mm).
+     ROS X=CAD Y, ROS Y=-CAD X, ROS Z=CAD Z. -->
+<robot name="box_tank">
+  <material name="body"><color rgba="0.12 0.22 0.26 1"/></material>
+  <material name="rubber"><color rgba="0.06 0.07 0.08 1"/></material>
+  <material name="sensor"><color rgba="0.24 0.8 0.68 1"/></material>
+  <link name="base_link">
+    <!-- Schematic chassis envelope only; wheel positions below are STEP-derived. -->
+    <visual><origin xyz="0 0 0.065"/><geometry><box size="0.26 0.20 0.13"/></geometry><material name="body"/></visual>
+  </link>
+  <link name="base_footprint"/>
+  <joint name="footprint_joint" type="fixed"><parent link="base_link"/><child link="base_footprint"/><origin xyz="0 0 -0.045"/></joint>
+  <link name="rear_right_wheel"><visual><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.045" length="0.055"/></geometry><material name="rubber"/></visual></link>
+  <link name="rear_left_wheel"><visual><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.045" length="0.055"/></geometry><material name="rubber"/></visual></link>
+  <link name="front_left_wheel"><visual><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.045" length="0.055"/></geometry><material name="rubber"/></visual></link>
+  <link name="front_right_wheel"><visual><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.045" length="0.055"/></geometry><material name="rubber"/></visual></link>
+  <joint name="rear_right_wheel_joint" type="continuous"><parent link="base_link"/><child link="rear_right_wheel"/><origin xyz="-0.107781275613 -0.14587 0"/><axis xyz="0 1 0"/></joint>
+  <joint name="rear_left_wheel_joint" type="continuous"><parent link="base_link"/><child link="rear_left_wheel"/><origin xyz="-0.107781275613 0.14587 0"/><axis xyz="0 1 0"/></joint>
+  <joint name="front_left_wheel_joint" type="continuous"><parent link="base_link"/><child link="front_left_wheel"/><origin xyz="0.107781275613 0.14587 0"/><axis xyz="0 1 0"/></joint>
+  <joint name="front_right_wheel_joint" type="continuous"><parent link="base_link"/><child link="front_right_wheel"/><origin xyz="0.107781275613 -0.14587 0"/><axis xyz="0 1 0"/></joint>
+  <!-- L2 SDK origin = bottom mounting surface centre, NOT vendor STEP origin.
+       Stationary IMU: approximately (-0.18,+9.36,-3.51) m/s^2.
+       SDK +Y, not vendor CAD +X, points mostly upward in this assembly.
+       Gravity tilt checked; yaw and translation remain CAD-derived provisional. -->
+  <link name="unilidar_lidar"><visual><origin xyz="0 0 0.025"/><geometry><cylinder radius="0.0375" length="0.05"/></geometry><material name="sensor"/></visual></link>
+  <joint name="lidar_mount" type="fixed"><parent link="base_link"/><child link="unilidar_lidar"/><origin xyz="0.105848277258 0 0.17804" rpy="1.91986217719 0 1.57079632679"/></joint>
+  <!-- Existing unitree-l2.service owns unilidar_lidar -> unilidar_imu.
+       Do not duplicate that static transform here. -->
+</robot>

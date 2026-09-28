@@ -1,0 +1,10 @@
+robot_base:
+  ros__parameters:
+    can_interface: can0
+    motion_enabled: true
+    session_limit_s: 0.0
+    allow_ros_control: false
+    web_enabled: true
+    web_require_password: false
+    web_address: 192.168.67.149
+    web_port: 8443

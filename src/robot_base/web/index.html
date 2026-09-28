@@ -1,0 +1,15 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>BOX TANK · Пульт</title><link rel="stylesheet" href="/style.css"></head>
+<body><main><header><span class="eyebrow">BOX TANK / ROS 2</span><h1>Пульт робота</h1><p>Локальное управление · 15 А на мотор · без таймера сессии</p></header>
+<form id="login" hidden><label>Пароль пульта<input id="password" type="password" autocomplete="current-password" required></label><button>Войти</button></form>
+<p id="message" role="status">Подключение…</p><section id="controls" hidden>
+<div class="topline"><span id="state">—</span><button id="stop" class="stop">STOP</button></div>
+<p id="reason">Движение выключено</p><div class="drive"><div id="joystick" aria-label="Джойстик: вперёд и поворот"><span class="axis vertical"></span><span class="axis horizontal"></span><span id="knob"></span><span class="forward">ВПЕРЁД</span></div>
+<button id="deadman" aria-pressed="false">Включить управление</button></div>
+<div class="turns"><button id="turn-left">↶ На месте влево</button> <button id="turn-right">На месте вправо ↷</button></div>
+<p class="hint">Танковый разворот: после включения управления нажми кнопку поворота. На клавиатуре — A или D без W/S. Борта вращаются в противоположные стороны.</p>
+<label>Скорость при полном отклонении, об/мин<input id="speed" type="number" min="0" step="1" value="12" inputmode="decimal"></label>
+<p class="hint">Программный потолок оборотов отключён. Начальное значение — 12 об/мин, его можно менять при остановленном управлении. Защита ODrive остаётся 120 об/мин; превышение может вызвать ошибку и остановку.</p>
+<p class="hint">Один раз нажми «Включить управление», затем используй WASD / стрелки или джойстик одной рукой. Отпускание направления задаёт нулевую скорость. Повторное нажатие выключает управление. STOP или Esc — аварийная остановка со сбросом. Скрытие или закрытие вкладки выключает управление.</p>
+<button id="reset" class="secondary">Сбросить защёлкнутую ошибку</button>
+<div id="axes" class="cards"></div><p class="hint">Лидар и веб-пульт не заменяют аппаратное отключение питания. После перезапуска движение всегда запрещено.</p>
+</section></main><script src="/app.js"></script></body></html>

@@ -1,0 +1,27 @@
+[Unit]
+Description=BOX TANK ROS 2 base and authenticated HTTPS teleoperation
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=taras
+WorkingDirectory=/home/taras/robot/ros2_ws
+Environment=ROS_DOMAIN_ID=42
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/taras/robot/ros2_ws/deploy/cyclone-pi.xml
+Environment=ROBOT_RUNTIME=/run/robot-base
+RuntimeDirectory=robot-base
+ExecStart=/bin/bash /home/taras/robot/ros2_ws/deploy/start-base.sh
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

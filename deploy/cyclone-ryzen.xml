@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<CycloneDDS xmlns="https://cdds.io/config"><Domain Id="any">
+ <General><Interfaces><NetworkInterface address="192.168.67.140"/></Interfaces><AllowMulticast>false</AllowMulticast></General>
+ <Discovery><Peers><Peer Address="192.168.67.149"/><Peer Address="192.168.67.140"/></Peers><ParticipantIndex>auto</ParticipantIndex><MaxAutoParticipantIndex>32</MaxAutoParticipantIndex></Discovery>
+</Domain></CycloneDDS>
