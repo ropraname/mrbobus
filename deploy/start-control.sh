@@ -2,4 +2,4 @@
 set -eo pipefail
 source /opt/ros/jazzy/setup.bash
 source /home/taras/robot/mrbobus_ws/install/setup.bash
-exec ros2 launch mrbobus_bringup control.launch.py can:=can0 current_limit:=3.0 profile:=floor gain_profile:="${DRIVE_GAIN_PROFILE:-low_i}"
+exec ros2 launch mrbobus_bringup control.launch.py can:=can0 current_limit:="${DRIVE_CURRENT_LIMIT:-3.0}" profile:=floor gain_profile:="${DRIVE_GAIN_PROFILE:-low_i}"
