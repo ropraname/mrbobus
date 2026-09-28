@@ -1,0 +1,19 @@
+[Unit]
+Description=Mrbobus field console, camera and LIO viewer
+Wants=network-online.target mrbobus-control.service unitree-l2.service
+After=network-online.target mrbobus-stop.service mrbobus-control.service unitree-l2.service
+Requires=mrbobus-stop.service
+[Service]
+User=taras
+SupplementaryGroups=video
+WorkingDirectory=/home/taras/robot/mrbobus_ws
+Environment=ROS_DOMAIN_ID=42
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/taras/robot/ros2_ws/deploy/cyclone-pi.xml
+ExecStart=/bin/bash /home/taras/robot/mrbobus_ws/deploy/start-console.sh
+KillSignal=SIGTERM
+TimeoutStopSec=25
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

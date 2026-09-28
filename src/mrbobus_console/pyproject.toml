@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "mrbobus-console"
+version = "0.1.0"
+description = "ROS 2 field console for mrbobus"
+requires-python = ">=3.10"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mrbobus_console*"]
