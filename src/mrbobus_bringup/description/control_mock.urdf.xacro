@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mrbobus">
+  <xacro:include filename="$(find robot_base)/description/robot.urdf"/>
+  <!-- Test standard controllers with the existing geometry, without any CAN transport. -->
+  <ros2_control name="MrbobusMock" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+      <param name="calculate_dynamics">true</param>
+    </hardware>
+    <xacro:macro name="wheel" params="name">
+      <joint name="${name}_wheel_joint">
+        <command_interface name="velocity"/>
+        <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+        <state_interface name="velocity"><param name="initial_value">0.0</param></state_interface>
+      </joint>
+    </xacro:macro>
+    <xacro:wheel name="rear_right"/><xacro:wheel name="rear_left"/>
+    <xacro:wheel name="front_left"/><xacro:wheel name="front_right"/>
+  </ros2_control>
+</robot>
