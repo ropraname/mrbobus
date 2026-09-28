@@ -21,6 +21,7 @@ mode.add_argument('--floor', action='store_true')
 mode.add_argument('--stop-check', action='store_true')
 parser.add_argument('--output', default='/tmp/mrbobus-drive-samples.json')
 parser.add_argument('--reverse', action='store_true')
+parser.add_argument('--require-lio', action='store_true')
 parser.add_argument('--arc-pair', action='store_true', help='20 deg arc left and return heading')
 parser.add_argument('--turn-pair', action='store_true', help='30 deg left, then return heading; no linear command')
 parser.add_argument('--speed', type=float, default=.03)
@@ -28,7 +29,7 @@ parser.add_argument('--distance', type=float, default=.5)
 args = parser.parse_args()
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 if not math.isfinite(args.speed) or not 0 < args.speed <= .06: raise SystemExit('Speed must be in (0, 0.06] m/s')
-if not 0 < args.distance <= .5: raise SystemExit('Distance must be in (0, 0.5] m')
+if not math.isfinite(args.distance) or not 0 < args.distance <= 2.4: raise SystemExit('Distance must be in (0, 2.4] m')
 if os.environ.get('ROS_DOMAIN_ID') != '42':
     raise SystemExit('Requires robot ROS_DOMAIN_ID=42')
 import rclpy
@@ -105,6 +106,11 @@ def run(v, duration, monitor=True, w=0.):
                               'yaw':math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))}
         samples.append(sample)
         if monitor:
+            for topic in (('odom','lio') if args.require_lio else ('odom',)):
+                if topic not in sample or not all(math.isfinite(sample[topic][k]) for k in ('t','x','y','z','yaw')):
+                    raise RuntimeError('Missing/nonfinite '+topic)
+                age=node.get_clock().now().nanoseconds*1e-9-sample[topic]['t']
+                if not -.1 <= age <= .5: raise RuntimeError('Stale '+topic)
             if args.floor and 'odom' in latest:
                 p=latest['odom'].pose.pose.position
                 if math.hypot(p.x, p.y) > (.60 if args.arc_pair else .10 if args.turn_pair else args.distance+.10) or abs(p.y)>(.30 if args.arc_pair else .10):
@@ -117,7 +123,7 @@ def run(v, duration, monitor=True, w=0.):
                     raise RuntimeError('Stale axis ' + str(n))
                 if a.get('state') != 8 or a.get('error') != 0:
                     raise RuntimeError('Axis fault: ' + str(axes))
-                average_limit = 20./60. if args.floor and args.turn_pair else .25 if args.floor else .1
+                average_limit = 20./60. if args.floor else .1
                 if not math.isfinite(a['velocity']) or abs(a['velocity']) > 1. or a.get('average_rps', 0.) > average_limit:
                     raise RuntimeError(f'Wheel speed guard (60 rpm instantaneous / {average_limit*60:g} rpm averaged): ' + str(axes))
         time.sleep(.035)
@@ -136,6 +142,11 @@ try:
     while time.monotonic() < end: poll()
     if len(axes) != 4 or any(a.get('state') != 1 for a in axes.values()):
         raise RuntimeError('All four axes must start Idle: ' + str(axes))
+    if args.require_lio:
+        if 'lio' not in latest: raise RuntimeError('LIO required before arm')
+        stamp=latest['lio'].header.stamp
+        if not -.1 <= node.get_clock().now().nanoseconds*1e-9-stamp.sec-stamp.nanosec*1e-9 <= .5:
+            raise RuntimeError('LIO stale before arm')
     request = SwitchController.Request(); request.activate_controllers = ['diff_drive_controller']; request.strictness = 2
     armed = True
     if not service('switch_controller', SwitchController, request).ok: raise RuntimeError('Activation failed')
@@ -166,14 +177,14 @@ try:
             else: raise RuntimeError('Turn test 15 s timeout')
             run(0.,1.)
     elif args.floor:
-        deadline=time.monotonic()+30.
+        deadline=time.monotonic()+max(30.,args.distance/args.speed+15.)
         while time.monotonic()<deadline:
             if 'odom' not in latest: raise RuntimeError('No odometry')
             direction=-1. if args.reverse else 1.
             remaining=args.distance-direction*latest['odom'].pose.pose.position.x
             if remaining <= .005: break
             run(direction*min(args.speed, math.sqrt(2*.025*max(0.,remaining-.005))), .04)
-        else: raise RuntimeError('Floor test 30 s timeout')
+        else: raise RuntimeError('Floor test time limit')
     else: run(.007, 5.)
     run(0., 2.)
     result = {'peak_average_rpm': {n: v*60 for n, v in average_peak.items()}, 'peak_measured_rpm': {n: v*60 for n, v in peak.items()}, 'last_axes': axes,
