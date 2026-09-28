@@ -188,7 +188,7 @@ class Console(Node):
             active=self.gate.active and ready and len(self.axes)==4 and all(x['state']==8 and x['error']==0 and now-x['at']<.5 for x in self.axes.values())
             return {'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
     def camera(self):
-        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','1280x720','-framerate','30','-i',self.args.camera,'-c:v','copy','-f','image2pipe','pipe:1']
+        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','640x480','-framerate','30','-i',self.args.camera,'-c:v','copy','-f','image2pipe','pipe:1']
         while self.running:
             try:
                 self.camera_process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True);buffer=b'';last=0.
