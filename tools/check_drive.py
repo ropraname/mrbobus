@@ -22,11 +22,14 @@ mode.add_argument('--stop-check', action='store_true')
 parser.add_argument('--output', default='/tmp/mrbobus-drive-samples.json')
 parser.add_argument('--reverse', action='store_true')
 parser.add_argument('--require-lio', action='store_true')
+parser.add_argument('--sequence', choices=['line-return','full'])
 parser.add_argument('--arc-pair', action='store_true', help='20 deg arc left and return heading')
 parser.add_argument('--turn-pair', action='store_true', help='30 deg left, then return heading; no linear command')
 parser.add_argument('--speed', type=float, default=.03)
 parser.add_argument('--distance', type=float, default=.5)
 args = parser.parse_args()
+if args.sequence and (not args.floor or args.reverse or args.arc_pair or args.turn_pair):
+    parser.error('Sequence requires floor mode without another motion selector')
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 if not math.isfinite(args.speed) or not 0 < args.speed <= .06: raise SystemExit('Speed must be in (0, 0.06] m/s')
 if not math.isfinite(args.distance) or not 0 < args.distance <= 2.4: raise SystemExit('Distance must be in (0, 2.4] m')
@@ -50,6 +53,7 @@ can.bind(('can0',)); can.setblocking(False)
 history = {n: deque() for n in range(4)}
 average_peak = {n: 0. for n in range(4)}
 axes = {}; peak = {n: 0. for n in range(4)}; samples = []
+phase = 'initializing'; stages = []
 
 def poll():
     rclpy.spin_once(node, timeout_sec=.005)
@@ -99,6 +103,7 @@ def run(v, duration, monitor=True, w=0.):
     while time.monotonic() < end:
         command(v,w); poll()
         sample={str(n): dict(a) for n, a in axes.items()}
+        sample['phase']=phase
         for topic in ('odom','lio'):
             if topic in latest:
                 msg=latest[topic];p=msg.pose.pose.position;q=msg.pose.pose.orientation
@@ -123,7 +128,7 @@ def run(v, duration, monitor=True, w=0.):
                     raise RuntimeError('Stale axis ' + str(n))
                 if a.get('state') != 8 or a.get('error') != 0:
                     raise RuntimeError('Axis fault: ' + str(axes))
-                average_limit = 20./60. if args.floor else .1
+                average_limit = 24./60. if args.floor and args.turn_pair else 20./60. if args.floor else .1
                 if not math.isfinite(a['velocity']) or abs(a['velocity']) > 1. or a.get('average_rps', 0.) > average_limit:
                     raise RuntimeError(f'Wheel speed guard (60 rpm instantaneous / {average_limit*60:g} rpm averaged): ' + str(axes))
         time.sleep(.035)
@@ -143,10 +148,15 @@ try:
     if len(axes) != 4 or any(a.get('state') != 1 for a in axes.values()):
         raise RuntimeError('All four axes must start Idle: ' + str(axes))
     if args.require_lio:
-        if 'lio' not in latest: raise RuntimeError('LIO required before arm')
-        stamp=latest['lio'].header.stamp
-        if not -.1 <= node.get_clock().now().nanoseconds*1e-9-stamp.sec-stamp.nanosec*1e-9 <= .5:
-            raise RuntimeError('LIO stale before arm')
+        deadline=time.monotonic()+20.; stable_since=None
+        while time.monotonic()<deadline:
+            poll(); msg=latest.get('lio')
+            age=math.inf if msg is None else node.get_clock().now().nanoseconds*1e-9-msg.header.stamp.sec-msg.header.stamp.nanosec*1e-9
+            if -.1 <= age <= .5:
+                stable_since=stable_since or time.monotonic()
+                if time.monotonic()-stable_since>=2.:break
+            else:stable_since=None
+        else:raise RuntimeError('LIO did not become fresh before arm')
     request = SwitchController.Request(); request.activate_controllers = ['diff_drive_controller']; request.strictness = 2
     armed = True
     if not service('switch_controller', SwitchController, request).ok: raise RuntimeError('Activation failed')
@@ -163,7 +173,26 @@ try:
             raise RuntimeError('STOP did not report all Idle within 1s')
         print(json.dumps({'stop_to_all_idle_s':time.monotonic()-start}))
         raise SystemExit(0)
+    if args.floor and not (args.turn_pair or args.arc_pair):
+        # One odometry origin and one activation for the whole out-and-back series.
+        targets=(args.distance,0.) if args.sequence else ((-args.distance if args.reverse else args.distance),)
+        for index,target in enumerate(targets):
+            phase='reverse' if args.reverse or index else 'forward'
+            print('Stage: '+phase,flush=True)
+            direction=-1. if args.reverse or index else 1.
+            deadline=time.monotonic()+max(30.,args.distance/args.speed+15.)
+            while time.monotonic()<deadline:
+                if 'odom' not in latest:raise RuntimeError('No odometry')
+                remaining=direction*(target-latest['odom'].pose.pose.position.x)
+                if remaining<=.005:break
+                run(direction*min(args.speed,math.sqrt(2*.025*max(0.,remaining-.005))),.04)
+            else:raise RuntimeError('Floor test time limit')
+            run(0.,2.)
+            stages.append({'phase':phase,'odom':samples[-1].get('odom'),'lio':samples[-1].get('lio')})
+        if args.sequence=='full':args.turn_pair=True
     if args.turn_pair or args.arc_pair:
+        phase='turn'
+        print('Stage: turn and return',flush=True)
         for target in (math.radians(20 if args.arc_pair else 30), 0.):
             deadline=time.monotonic()+15.
             while time.monotonic()<deadline:
@@ -176,20 +205,13 @@ try:
                 run(.05 if args.arc_pair else 0.,.04,w=w)
             else: raise RuntimeError('Turn test 15 s timeout')
             run(0.,1.)
-    elif args.floor:
-        deadline=time.monotonic()+max(30.,args.distance/args.speed+15.)
-        while time.monotonic()<deadline:
-            if 'odom' not in latest: raise RuntimeError('No odometry')
-            direction=-1. if args.reverse else 1.
-            remaining=args.distance-direction*latest['odom'].pose.pose.position.x
-            if remaining <= .005: break
-            run(direction*min(args.speed, math.sqrt(2*.025*max(0.,remaining-.005))), .04)
-        else: raise RuntimeError('Floor test time limit')
-    else: run(.007, 5.)
+        stages.append({'phase':phase,'odom':samples[-1].get('odom'),'lio':samples[-1].get('lio')})
+    elif not args.floor:
+        phase='suspended';run(.007,5.)
     run(0., 2.)
     result = {'peak_average_rpm': {n: v*60 for n, v in average_peak.items()}, 'peak_measured_rpm': {n: v*60 for n, v in peak.items()}, 'last_axes': axes,
               'odom_x': latest['odom'].pose.pose.position.x if 'odom' in latest else None,
-              'sample_count': len(samples), 'max_abs_yaw_deg': max((abs(x['odom']['yaw'])*180/math.pi for x in samples if 'odom' in x),default=0.)}
+              'stages':stages, 'sample_count': len(samples), 'max_abs_yaw_deg': max((abs(x['odom']['yaw'])*180/math.pi for x in samples if 'odom' in x),default=0.)}
     Path(args.output).with_suffix('.summary.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
 finally:
