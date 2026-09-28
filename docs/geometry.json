@@ -1,0 +1,99 @@
+{
+  "source": "Fusion MCP live BOX_TANK_0.2_LIGHT, 2026-09-28; read-only",
+  "base_cad_mm": [
+    99.8769198446908,
+    -120.84827725799023,
+    -0.040000000000010694
+  ],
+  "ros_axes": "X=CAD Y, Y=-CAD X, Z=CAD Z",
+  "wheels": [
+    {
+      "component": "MOTOR_WHEEL_90_YARIK_2:1",
+      "centre_cad_mm": [
+        -45.99308015530917,
+        -13.067001644992331,
+        -0.03999999999999204
+      ],
+      "radius_mm": 45.0,
+      "width_mm": 54.999999999999964,
+      "centre_ros_m": [
+        0.1077812756129979,
+        0.14586999999999997,
+        1.865174681370263e-17
+      ]
+    },
+    {
+      "component": "MOTOR_WHEEL_90_YARIK_3:1",
+      "centre_cad_mm": [
+        245.7469198446907,
+        -13.067001644992349,
+        -0.039999999999995595
+      ],
+      "radius_mm": 45.0,
+      "width_mm": 55.000000000000114,
+      "centre_ros_m": [
+        0.10778127561299788,
+        -0.1458699999999999,
+        1.509903313490213e-17
+      ]
+    },
+    {
+      "component": "MOTOR_WHEEL_90_YARIK_4:1",
+      "centre_cad_mm": [
+        245.7469198446909,
+        -228.62955287098808,
+        -0.04000000000000625
+      ],
+      "radius_mm": 45.0,
+      "width_mm": 54.99999999999994,
+      "centre_ros_m": [
+        -0.10778127561299784,
+        -0.14587000000000008,
+        4.440892098500626e-18
+      ]
+    },
+    {
+      "component": "MOTOR_WHEEL_90_YARIK_1:1",
+      "centre_cad_mm": [
+        -45.993080155309215,
+        -228.62955287098816,
+        -0.040000000000048885
+      ],
+      "radius_mm": 45.0,
+      "width_mm": 55.00000000000019,
+      "centre_ros_m": [
+        -0.10778127561299793,
+        0.14587,
+        -3.819167204710538e-17
+      ]
+    }
+  ],
+  "lidar_mount_cad_mm": [
+    99.87691984469006,
+    -15.0,
+    178.0
+  ],
+  "lidar_mount_ros_m": [
+    0.105848277258,
+    0.0,
+    0.17804
+  ],
+  "lidar_outward_normal_ros": [
+    0.9396926207859084,
+    0.0,
+    -0.3420201433256687
+  ],
+  "sdk_yaw_alignment": "Provisional; normal matches CAD and gravity, in-plane orientation needs physical check",
+  "base_component_envelope_ros_m": {
+    "size": [
+      0.30702,
+      0.27004,
+      0.21303
+    ],
+    "centre": [
+      0.0,
+      0.0,
+      0.092545
+    ]
+  }
+}

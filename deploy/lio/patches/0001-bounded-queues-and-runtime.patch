@@ -1,0 +1,130 @@
+diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
+index b6d5f4a..9ff1e7f 100644
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -414,7 +414,7 @@ bool sync_packages(MeasureGroup &meas) {
+     /*** push imu data, and pop from imu buffer ***/
+     if (p_imu->imu_need_init_) {
+         double imu_time = get_time_sec(imu_deque.front()->header.stamp);
+-        meas.imu.shrink_to_fit();
++        meas.imu.clear();
+         while ((!imu_deque.empty()) && (imu_time < lidar_end_time)) {
+             imu_time = get_time_sec(imu_deque.front()->header.stamp);
+             if (imu_time > lidar_end_time) break;
+@@ -426,7 +426,7 @@ bool sync_packages(MeasureGroup &meas) {
+         }
+     } else if (!init_map) {
+         double imu_time = get_time_sec(imu_deque.front()->header.stamp);
+-        meas.imu.shrink_to_fit();
++        meas.imu.clear();
+         meas.imu.emplace_back(imu_last_ptr);
+ 
+         while ((!imu_deque.empty()) && (imu_time < lidar_end_time)) {
+@@ -762,11 +762,13 @@ int main(int argc, char **argv) {
+     /*** debug record ***/
+     FILE *fp;
+     string pos_log_dir = root_dir + "/Log/pos_log.txt";
+-    fp = fopen(pos_log_dir.c_str(), "w");
++    fp = runtime_pos_log ? fopen(pos_log_dir.c_str(), "w") : nullptr;
+ 
+     ofstream fout_out, fout_imu_pbp;
+-    fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), ios::out);
+-    fout_imu_pbp.open(DEBUG_FILE_DIR("imu_pbp.txt"), ios::out);
++    if (runtime_pos_log) {
++        fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), ios::out);
++        fout_imu_pbp.open(DEBUG_FILE_DIR("imu_pbp.txt"), ios::out);
++    }
+     if (fout_out && fout_imu_pbp)
+         cout << "~~~~" << ROOT_DIR << " file opened" << endl;
+     else
+@@ -780,7 +782,7 @@ int main(int argc, char **argv) {
+     // } else {
+     sub_pcl = nh->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+     // }
+-    auto sub_imu = nh->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 200000, imu_cbk);
++    auto sub_imu = nh->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_last(1000), imu_cbk);
+ 
+     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFullRes;
+     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFullRes_body;
+@@ -790,25 +792,25 @@ int main(int argc, char **argv) {
+ 
+     if (!odom_only){
+         pubLaserCloudFullRes = nh->create_publisher<sensor_msgs::msg::PointCloud2>
+-                ("/cloud_registered", 100000);
++                ("/cloud_registered", 10);
+         pubLaserCloudFullRes_body = nh->create_publisher<sensor_msgs::msg::PointCloud2>
+-                ("/cloud_registered_body", 100000);
++                ("/cloud_registered_body", 10);
+         pubLaserCloudEffect = nh->create_publisher<sensor_msgs::msg::PointCloud2>
+-                ("/cloud_effected", 100000);
++                ("/cloud_effected", 10);
+         pubLaserCloudMap = nh->create_publisher<sensor_msgs::msg::PointCloud2>
+-                ("/Laser_map", 100000);
++                ("/Laser_map", 10);
+         pubPath = nh->create_publisher<nav_msgs::msg::Path>
+-                ("/path", 100000);
++                ("/path", 10);
+     }
+ 
+     // Choose topic name depending on odom_only value
+     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped;
+     if (odom_only){
+         pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
+-                ("/odom_corrected", 100000);
++                ("/odom_corrected", 10);
+     } else {
+         pubOdomAftMapped = nh->create_publisher<nav_msgs::msg::Odometry>
+-                ("/aft_mapped_to_init", 100000);
++                ("/aft_mapped_to_init", 10);
+     }
+ 
+     //auto plane_pub = nh->create_publisher<visualization_msgs::msg::Marker>
+@@ -816,12 +818,12 @@ int main(int argc, char **argv) {
+     auto tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(nh);
+ //------------------------------------------------------------------------------------------------------
+     signal(SIGINT, SigHandle);
+-    rclcpp::Rate rate(5000);
++    rclcpp::executors::SingleThreadedExecutor executor;
++    executor.add_node(nh);
++    rclcpp::Rate rate(1000);
+     while (rclcpp::ok()) {
+         if (flg_exit) break;
+         //ros::spinOnce();
+-        rclcpp::executors::SingleThreadedExecutor executor;
+-        executor.add_node(nh);
+         executor.spin_some(); // 处理当前可用的回调
+ 
+         if (sync_packages(Measures)) {
+@@ -933,8 +935,8 @@ int main(int argc, char **argv) {
+             t2 = omp_get_wtime();
+ 
+             /*** iterated state estimation ***/
+-            crossmat_list.reserve(feats_down_size);
+-            pbody_list.reserve(feats_down_size);
++            crossmat_list.resize(feats_down_size);
++            pbody_list.resize(feats_down_size);
+             // pbody_ext_list.reserve(feats_down_size);
+ 
+             for (size_t i = 0; i < feats_down_body->size(); i++) {
+@@ -1301,7 +1303,7 @@ int main(int argc, char **argv) {
+                                  << feats_undistort->points.size() << endl;
+                     }
+                 }
+-                dump_lio_state_to_log(fp);
++                if (fp) dump_lio_state_to_log(fp);
+             }
+         }
+         rate.sleep();
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index da017ac..ad0ecd6 100644
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -271,7 +271,7 @@ void Preprocess::unilidar_handler(const sensor_msgs::msg::PointCloud2::SharedPtr
+ 
+     // std::cout << "plsize = " << plsize << ", given_offset_time = " << given_offset_time << std::endl;
+     int countElimnated = 0;
+-    for (int i = 0; i < plsize; i++)
++    for (int i = 0; i < plsize; i += std::max(1, point_filter_num))
+     {
+       PointType added_pt;
+       

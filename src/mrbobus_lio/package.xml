@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mrbobus_lio</name><version>0.1.0</version>
+  <description>Portable Unitree L2 Point-LIO configuration for mrbobus.</description>
+  <maintainer email="robot@example.com">mrbobus</maintainer><license>Apache-2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>point_lio</exec_depend><exec_depend>launch_ros</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

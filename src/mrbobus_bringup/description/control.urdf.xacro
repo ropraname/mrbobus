@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mrbobus">
+  <xacro:arg name="can" default="vcan0"/>
+  <xacro:arg name="lock_path" default="/tmp/robot-base-vcan0.lock"/>
+  <xacro:arg name="tx_spacing_us" default="1500"/>
+  <xacro:include filename="$(find robot_base)/description/robot.urdf"/>
+  <ros2_control name="MrbobusODrive" type="system">
+    <hardware>
+      <plugin>odrive_ros2_control_plugin/ODriveHardwareInterface</plugin>
+      <param name="can">$(arg can)</param>
+      <param name="lock_path">$(arg lock_path)</param>
+      <param name="tx_spacing_us">$(arg tx_spacing_us)</param>
+      <param name="feedback_timeout">0.5</param>
+      <param name="current_limit">1.0</param>
+      <!-- 6 rpm wheel hard cap for initial commissioning. -->
+      <param name="max_velocity_rad_s">0.6283185307179586</param>
+    </hardware>
+    <xacro:macro name="wheel" params="name node_id direction">
+      <joint name="${name}_wheel_joint">
+        <param name="node_id">${node_id}</param><param name="direction">${direction}</param>
+        <command_interface name="velocity"/>
+        <state_interface name="position"/><state_interface name="velocity"/>
+      </joint>
+    </xacro:macro>
+    <xacro:wheel name="rear_right" node_id="0" direction="1"/>
+    <xacro:wheel name="rear_left" node_id="1" direction="-1"/>
+    <xacro:wheel name="front_left" node_id="2" direction="-1"/>
+    <xacro:wheel name="front_right" node_id="3" direction="1"/>
+  </ros2_control>
+</robot>
