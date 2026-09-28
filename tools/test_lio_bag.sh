@@ -29,7 +29,8 @@ trap cleanup EXIT
 ros2 launch mrbobus_lio l2_lio.launch.py config:="$config" >"$run_dir/lio.log" 2>&1 &
 launch_pid=$!
 sleep 1
-ros2 bag play "$bag_path" >"$run_dir/bag.log" 2>&1 &
+# Field bags also contain previously estimated odometry/TF: replay only sensor inputs.
+ros2 bag play "$bag_path" --topics /unilidar/cloud /unilidar/imu >"$run_dir/bag.log" 2>&1 &
 bag_pid=$!
 # Wall-time age is not meaningful on recorded timestamps; inspect pose/frequency.
 python3 "$script_dir/check_lio.py" --seconds "$seconds" | tee "$run_dir/check.json"
