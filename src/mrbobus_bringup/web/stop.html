@@ -1,0 +1,14 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>СТОП робота</title>
+<style>body{font:20px system-ui;background:#111827;color:white;max-width:700px;margin:30px auto;padding:20px}button{width:100%;border:0;border-radius:18px;font:700 24px system-ui;cursor:pointer}#stop{height:220px;background:#e11d48;color:white;font-size:56px;touch-action:manipulation}#ready{padding:20px;background:#d1fae5;color:#064e3b;margin:24px 0}#status{padding:16px;border:2px solid #fb7185;border-radius:12px}small{display:block;color:#cbd5e1;line-height:1.6}</style>
+<h1>Остановка робота</h1><p id="status">Проверяю связь…</p><button id="stop">СТОП</button><button id="ready">Разблокировать СТОП</button><small>СТОП, пробел или Esc отключают привод. Разрешение само не запускает колёса. Закрытие вкладки и потеря связи не останавливают робот. После СТОП автоматического продолжения нет.<br><br>Это программная остановка по Wi-Fi, не физическое отключение питания. После команды колёса переходят в свободный ход.</small>
+<script>
+const status=document.getElementById('status');
+async function post(path){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(1500)});if(!r.ok)throw Error('HTTP '+r.status);return r.json()}
+function show(text,good=false){status.textContent=text;status.style.borderColor=good?'#34d399':'#fb7185'}
+async function stop(){show('Останавливаю…');try{await post('/stop');show('СТОП отправлен. Повторный запуск заблокирован.')}catch(e){show('НЕТ СВЯЗИ: СТОП НЕ ПОДТВЕРЖДЁН!')}}
+document.getElementById('stop').addEventListener('pointerdown',stop);
+document.getElementById('stop').addEventListener('click',e=>{if(e.detail===0)stop()});
+document.getElementById('ready').onclick=async()=>{try{const s=await post('/ready');show(s.reason,s.ready)}catch(e){show('Нет связи. Разблокировка не подтверждена.')}};
+window.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='Escape'){e.preventDefault();stop()}});
+setInterval(async()=>{try{const r=await fetch('/status',{signal:AbortSignal.timeout(1500)});const s=await r.json();show(s.reason,s.ready)}catch(e){show('НЕТ СВЯЗИ: кнопка недоступна!')}},1000);
+</script></html>

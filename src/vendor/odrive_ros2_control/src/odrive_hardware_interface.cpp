@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
 #include <set>
 #include <mutex>
 #include <sys/file.h>
@@ -28,6 +29,7 @@ static double now_s() { return std::chrono::duration<double>(Clock::now().time_s
 struct Axis {
     uint32_t node_id;
     double direction;
+    double vel_gain = -1., vel_integrator_gain = -1.;
     double command = 0., position = 0., velocity = 0.;
     double heartbeat = -1., feedback = -1.;
     uint32_t error = 0;
@@ -70,14 +72,20 @@ private:
     bool fresh(const Axis& a, double now) const {
         return now-a.heartbeat <= feedback_timeout_ && now-a.feedback <= feedback_timeout_;
     }
+    bool stop_ready() const {
+        if(stop_file_.empty()) return interface_ != "can0";
+        int enabled=0;
+        std::ifstream file(stop_file_);
+        return (file >> enabled) && enabled==1;
+    }
     bool idle_all();
     return_type fail(const std::string& reason);
     std::recursive_mutex mutex_;
     bool connected_ = false, active_ = false, fault_ = false;
-    double arm_deadline_ = 0.;
+    double arm_deadline_ = 0., last_iq_request_ = 0.;
     double feedback_timeout_ = .5, max_velocity_ = .6283185307179586, current_limit_ = 1.;
     int pace_us_ = 1500, lock_fd_ = -1;
-    std::string interface_, lock_path_;
+    std::string interface_, lock_path_, stop_file_;
     EpollEventLoop loop_;
     SocketCanIntf can_;
     std::vector<Axis> axes_;
@@ -88,6 +96,8 @@ CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::Hardwa
     try {
         interface_ = info_.hardware_parameters.at("can");
         lock_path_ = info_.hardware_parameters.at("lock_path");
+        auto lease=info_.hardware_parameters.find("stop_file");
+        if(lease!=info_.hardware_parameters.end()) stop_file_=lease->second;
         auto get = [&](const char* key, double fallback) {
             auto it=info_.hardware_parameters.find(key);
             return it == info_.hardware_parameters.end() ? fallback : std::stod(it->second);
@@ -108,7 +118,17 @@ CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::Hardwa
                 throw std::runtime_error("Invalid node ID/direction");
             if (joint.command_interfaces.size()!=1 || joint.command_interfaces[0].name!="velocity")
                 throw std::runtime_error("Legacy profile supports velocity commands only");
-            axes_.push_back(Axis{static_cast<uint32_t>(id),sign});
+            Axis axis{static_cast<uint32_t>(id),sign};
+            auto gain=joint.parameters.find("vel_gain");
+            auto integrator=joint.parameters.find("vel_integrator_gain");
+            if(gain!=joint.parameters.end() && integrator!=joint.parameters.end()) {
+                axis.vel_gain=std::stod(gain->second);
+                axis.vel_integrator_gain=std::stod(integrator->second);
+                if(!std::isfinite(axis.vel_gain) || axis.vel_gain<0. || axis.vel_gain>1. ||
+                   !std::isfinite(axis.vel_integrator_gain) || axis.vel_integrator_gain<0. || axis.vel_integrator_gain>2.)
+                    throw std::runtime_error("Invalid velocity gains");
+            }
+            axes_.push_back(axis);
         }
         if (axes_.empty()) throw std::runtime_error("No axes configured");
     } catch (const std::exception& e) {
@@ -221,6 +241,7 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
     }
     if(stopping && !idle_all()) return fail("CAN failure during stop");
     if(!starting) return return_type::OK;
+    if(!stop_ready()) return fail("STOP button not ready; activation refused");
     drain();
     if(!active_ || fault_ || !can_.healthy()) return fail("Hardware not ready for activation");
     for(const auto& a:axes_)
@@ -232,6 +253,11 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
         Set_Limits_msg_t limits; limits.Velocity_Limit=2.; limits.Current_Limit=current_limit_;
         Set_Controller_Mode_msg_t mode; mode.Control_Mode=CONTROL_MODE_VELOCITY_CONTROL; mode.Input_Mode=INPUT_MODE_PASSTHROUGH;
         Clear_Errors_msg_t clear; clear.Identify=0;
+        if(a.vel_gain>=0.) {
+            Set_Vel_Gains_msg_t gains;
+            gains.Vel_Gain=a.vel_gain; gains.Vel_Integrator_Gain=a.vel_integrator_gain;
+            if(!send(a,gains)) return fail("CAN failure setting velocity gains");
+        }
         Set_Axis_State_msg_t state; state.Axis_Requested_State=AXIS_STATE_CLOSED_LOOP_CONTROL;
         if(!send(a,zero) || !send(a,limits) || !send(a,mode) || !send(a,clear) || !send(a,state))
             return fail("CAN failure during zero-speed activation");
@@ -246,6 +272,8 @@ return_type ODriveHardwareInterface::read(const rclcpp::Time&,const rclcpp::Dura
     if(!connected_ || fault_) return return_type::ERROR;
     drain();
     if(!can_.healthy()) return fail("CAN receive failure");
+    if(std::any_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.commanded;}) && !stop_ready())
+        return fail("STOP button latched or flag unavailable");
     double now=now_s();
     for(const auto& a:axes_) {
         if(!fresh(a,now)) return fail("Stale feedback on axis "+std::to_string(a.node_id));
@@ -264,6 +292,8 @@ return_type ODriveHardwareInterface::write(const rclcpp::Time&,const rclcpp::Dur
     std::lock_guard<std::recursive_mutex> guard(mutex_);
     if(fault_) return return_type::ERROR;
     if(!active_) return return_type::OK;
+    if(std::any_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.commanded;}) && !stop_ready())
+        return fail("STOP button latched or flag unavailable");
     bool ready=std::all_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.state==AXIS_STATE_CLOSED_LOOP_CONTROL && a.error==0;});
     for(const auto& a:axes_) if(a.commanded && (!std::isfinite(a.command) || std::abs(a.command)>max_velocity_+1e-6))
         return fail("Non-finite or excessive wheel velocity");
@@ -272,6 +302,18 @@ return_type ODriveHardwareInterface::write(const rclcpp::Time&,const rclcpp::Dur
         msg.Input_Vel=ready ? a.direction*a.command/(2*M_PI) : 0.;
         msg.Input_Torque_FF=0.;
         if(!send(a,msg)) return fail("CAN transmit failure");
+    }
+    // Diagnostics share the CAN owner and stop with the drive. Requests feed the
+    // legacy firmware watchdog, so never poll an Idle/disarmed axis.
+    if(ready && now_s()-last_iq_request_ >= .1) {
+        for(const auto& a:axes_) if(a.commanded) {
+            can_frame request{};
+            request.can_id=(a.node_id << 5) | Get_Iq_msg_t::cmd_id | CAN_RTR_FLAG;
+            request.can_dlc=8;
+            if(!can_.send_can_frame(request)) return fail("CAN transmit failure requesting Iq");
+            if(pace_us_>0) std::this_thread::sleep_for(std::chrono::microseconds(pace_us_));
+        }
+        last_iq_request_=now_s();
     }
     return return_type::OK;
 }

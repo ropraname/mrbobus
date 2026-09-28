@@ -1,5 +1,13 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="mrbobus">
+  <xacro:arg name="set_gains" default="false"/>
+  <xacro:arg name="rear_p" default="0.2"/><xacro:arg name="rear_i" default="1.0"/>
+  <xacro:arg name="front_p" default="0.106"/><xacro:arg name="front_i" default="0.3333333333333333"/>
+  <xacro:property name="rear_p" value="$(arg rear_p)"/><xacro:property name="rear_i" value="$(arg rear_i)"/>
+  <xacro:property name="front_p" value="$(arg front_p)"/><xacro:property name="front_i" value="$(arg front_i)"/>
+  <xacro:arg name="stop_file" default=""/>
+  <xacro:arg name="max_velocity_rad_s" default="0.6283185307179586"/>
+  <xacro:arg name="current_limit" default="1.0"/>
   <xacro:arg name="can" default="vcan0"/>
   <xacro:arg name="lock_path" default="/tmp/robot-base-vcan0.lock"/>
   <xacro:arg name="tx_spacing_us" default="1500"/>
@@ -11,13 +19,19 @@
       <param name="lock_path">$(arg lock_path)</param>
       <param name="tx_spacing_us">$(arg tx_spacing_us)</param>
       <param name="feedback_timeout">0.5</param>
-      <param name="current_limit">1.0</param>
+      <param name="current_limit">$(arg current_limit)</param>
+      <param name="stop_file">$(arg stop_file)</param>
       <!-- 6 rpm wheel hard cap for initial commissioning. -->
-      <param name="max_velocity_rad_s">0.6283185307179586</param>
+      <param name="max_velocity_rad_s">$(arg max_velocity_rad_s)</param>
     </hardware>
     <xacro:macro name="wheel" params="name node_id direction">
       <joint name="${name}_wheel_joint">
         <param name="node_id">${node_id}</param><param name="direction">${direction}</param>
+        <xacro:if value="$(arg set_gains)">
+          <!-- Baseline values from Taras' 2026-09-27 configuration backups. -->
+          <param name="vel_gain">${rear_p if int(node_id) &lt; 2 else front_p}</param>
+          <param name="vel_integrator_gain">${rear_i if int(node_id) &lt; 2 else front_i}</param>
+        </xacro:if>
         <command_interface name="velocity"/>
         <state_interface name="position"/><state_interface name="velocity"/>
       </joint>

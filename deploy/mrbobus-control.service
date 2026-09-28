@@ -1,0 +1,21 @@
+[Unit]
+Description=Mrbobus standard ros2_control (starts disarmed)
+Wants=network-online.target
+After=network-online.target mrbobus-stop.service robot-base.service
+Requires=mrbobus-stop.service
+Conflicts=robot-base.service
+[Service]
+User=taras
+WorkingDirectory=/home/taras/robot/mrbobus_ws
+Environment=ROS_DOMAIN_ID=42
+Environment=RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+Environment=CYCLONEDDS_URI=file:///home/taras/robot/ros2_ws/deploy/cyclone-pi.xml
+EnvironmentFile=-/run/mrbobus-stop/control.env
+RuntimeDirectory=robot-base
+ExecStart=/bin/bash /home/taras/robot/mrbobus_ws/deploy/start-control.sh
+KillSignal=SIGINT
+TimeoutStopSec=2
+Restart=no
+NoNewPrivileges=true
+[Install]
+WantedBy=multi-user.target

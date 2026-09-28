@@ -23,9 +23,14 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
 from controller_manager_msgs.srv import ListControllers, SwitchController
 
+fault_kind=sys.argv[1] if len(sys.argv)>1 else 'stale'
+stop_path=Path('/tmp/mrbobus-vcan-stop-flag')
+if fault_kind=='stop':stop_path.write_text('1')
+
 sock=socket.socket(socket.AF_CAN,socket.SOCK_RAW,socket.CAN_RAW)
 sock.bind(('vcan0',));sock.settimeout(.002)
 state={n:1 for n in range(4)}; error={n:2048 for n in state}
+gains={}
 velocity={n:0. for n in state};position=dict(velocity)
 last_rx={n:time.monotonic() for n in state}; silent=set()
 peak={n:0. for n in state}; counts={n:0 for n in state}
@@ -58,6 +63,7 @@ def simulate():
             velocity[n]=struct.unpack_from('<f',data)[0]
             peak[n]=max(peak[n],abs(velocity[n]));counts[n]+=1
         elif cmd==24:error[n]=0
+        elif cmd==27:gains[n]=struct.unpack('<ff',data)
 
 thread=threading.Thread(target=simulate,daemon=True);thread.start()
 rclpy.init();node=rclpy.create_node('odrive_vcan_test');latest={}
@@ -66,7 +72,7 @@ subs=[node.create_subscription(Odometry,'/odom',lambda m:latest.update(odom=m),1
 pub=node.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
 clients={k:node.create_client(t,'/controller_manager/'+k) for k,t in [('list_controllers',ListControllers),('switch_controller',SwitchController)]}
 log_path=Path('/tmp/mrbobus-odrive-vcan.log');log=log_path.open('w')
-proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0'],stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0','gain_profile:='+('soft' if fault_kind=='soft' else 'existing')] + (['stop_file:='+str(stop_path)] if fault_kind=='stop' else []),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
 
 def wait_for(predicate,timeout=10.):
     end=time.monotonic()+timeout
@@ -95,6 +101,8 @@ try:
     request=SwitchController.Request();request.activate_controllers=['diff_drive_controller'];request.strictness=2
     assert service('switch_controller',request).ok
     wait_for(lambda:all(s==8 for s in state.values()))
+    if fault_kind=='soft':
+        assert all(abs(gains[n][0]-(.05 if n<2 else .0265))<1e-6 for n in range(4)),gains
     drive(.01,0.,3.)
     wait_for(lambda:'odom' in latest and latest['odom'].pose.pose.position.x>.01)
     assert velocity[0]>0 and velocity[3]>0 and velocity[1]<0 and velocity[2]<0,velocity
@@ -113,8 +121,8 @@ try:
     assert service('switch_controller',request).ok
     wait_for(lambda:all(s==8 for s in state.values()))
     drive(.01,0.,2.)
-    fault_kind=sys.argv[1] if len(sys.argv)>1 else 'stale'
     if fault_kind=='error':error[2]=64;state[2]=1
+    elif fault_kind=='stop':stop_path.write_text('0')
     else:silent.add(2)
     drive(.01,0.,.9)
     wait_for(lambda:all(s==1 for s in state.values()),2.)
