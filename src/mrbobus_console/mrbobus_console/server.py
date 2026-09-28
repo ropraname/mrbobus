@@ -32,7 +32,7 @@ class Console(Node):
     def __init__(self,args):
         super().__init__('mrbobus_console');self.args=args;self.gate=MotionGate();self.lock=threading.RLock();self.operation=threading.Lock();self.running=True
         self.pose=None;self.pose_source=None;self.pose_time=0.;self.pose_matrix=None;self.lio_time=0.;self.wheel_pose=None
-        self.points=[];self.cloud_time=0.;self.cloud_processed=0.;self.cloud_hz=0.;self.previous_cloud=None;self.trace=[];self.axes={};self.voltage={}
+        self.cloud_frames=[];self.cloud_stats={};self.points=[];self.cloud_time=0.;self.cloud_processed=0.;self.cloud_hz=0.;self.previous_cloud=None;self.trace=[];self.axes={};self.voltage={}
         self.jpeg=None;self.camera_time=0.;self.camera_error='Подключение камеры';self.camera_process=None;self.lio_process=None;self.recorder=None
         self.session=datetime.now().strftime('field-%Y%m%d-%H%M%S');self.folder=Path(args.records)/self.session;self.marks=[];self.segment=0;self.record_error=None
         self.pub=self.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
@@ -66,17 +66,37 @@ class Console(Node):
         if self.previous_cloud:
             hz=1/max(.001,now-self.previous_cloud);self.cloud_hz=.9*self.cloud_hz+.1*hz
         self.previous_cloud=now;self.cloud_time=now
-        if now-self.cloud_processed<.25:return
-        self.cloud_processed=now
         try:
             fs={f.name:f.offset for f in msg.fields};endian='>' if msg.is_bigendian else '<'
             dtype=np.dtype({'names':['x','y','z'],'formats':[endian+'f4']*3,'offsets':[fs[k] for k in ('x','y','z')],'itemsize':msg.point_step})
-            a=np.frombuffer(msg.data,dtype=dtype);p=np.stack([a[k] for k in ('x','y','z')],axis=1);p=p[::max(1,len(p)//3000)]
-            p=p[np.isfinite(p).all(axis=1)];p=p[(np.linalg.norm(p,axis=1)>.3)&(np.linalg.norm(p,axis=1)<8)]
+            a=np.ndarray((msg.height,msg.width),dtype=dtype,buffer=msg.data,strides=(msg.row_step,msg.point_step)).reshape(-1)
+            p=np.stack([a[k] for k in ('x','y','z')],axis=1)
+            raw=len(p);p=p[np.isfinite(p).all(axis=1)]
+            radius=np.linalg.norm(p,axis=1);p=p[(radius>.3)&(radius<8)]
             t=transform_matrix(self.tf.lookup_transform('base_link',msg.header.frame_id,Time()));p=p@t[:3,:3].T+t[:3,3]
-            p=p[(p[:,2]>-.15)&(p[:,2]<2.5)]
-            with self.lock:self.points=np.round(p,3).tolist()
-        except Exception:pass
+            # Show below the chassis too: the robot may stand on a table or ramp.
+            p=p[(p[:,2]>-2.5)&(p[:,2]<3)]
+            with self.lock:
+                pose=self.pose_matrix.copy() if self.pose_matrix is not None else None
+                stable=self.pose_source=='LIO' and now-self.pose_time<.2
+            if stable:
+                world=p@pose[:3,:3].T+pose[:3,3]
+                self.cloud_frames=[(stamp,cloud) for stamp,cloud in self.cloud_frames if now-stamp<1.5]
+                self.cloud_frames.append((now,world))
+            else:self.cloud_frames=[]
+            if now-self.cloud_processed<.25:return
+            self.cloud_processed=now
+            if self.cloud_frames:
+                p=np.concatenate([cloud for _,cloud in self.cloud_frames])
+                # Spatial sampling retains surfaces instead of dropping whole scan phases.
+                _,indices=np.unique(np.floor(p/.04).astype(np.int32),axis=0,return_index=True)
+                p=p[indices];p=(p-pose[:3,3])@pose[:3,:3]
+            if len(p)>16000:p=p[np.linspace(0,len(p)-1,16000,dtype=int)]
+            with self.lock:
+                self.points=np.round(p,3).tolist()
+                self.cloud_stats={'raw':raw,'shown':len(p),'window':1.5 if stable else 0,'voxel':.04}
+        except Exception as e:
+            self.get_logger().warning('Cloud display: '+str(e),throttle_duration_sec=10)
     def call(self,client,request,timeout=6):
         if not client.wait_for_service(timeout_sec=timeout):raise ValueError('Контроллер не отвечает')
         future=client.call_async(request);event=threading.Event();future.add_done_callback(lambda _:event.set())
@@ -168,7 +188,7 @@ class Console(Node):
             active=self.gate.active and ready and len(self.axes)==4 and all(x['state']==8 and x['error']==0 and now-x['at']<.5 for x in self.axes.values())
             return {'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
     def camera(self):
-        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','640x480','-framerate','30','-i',self.args.camera,'-c:v','copy','-f','image2pipe','pipe:1']
+        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','1280x720','-framerate','30','-i',self.args.camera,'-c:v','copy','-f','image2pipe','pipe:1']
         while self.running:
             try:
                 self.camera_process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True);buffer=b'';last=0.
@@ -223,7 +243,7 @@ def main():
                 name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[path];content={'/':'text/html; charset=utf-8','/app.js':'text/javascript','/style.css':'text/css'}[path];self.reply(200,(Path(args.web)/name).read_bytes(),content)
             elif path=='/api/status':self.reply(200,node.status())
             elif path=='/api/cloud':
-                with node.lock:result={'points':node.points,'pose':node.pose,'source':node.pose_source,'age':time.monotonic()-node.cloud_time if node.cloud_time else None}
+                with node.lock:result={'points':node.points,'pose':node.pose,'source':node.pose_source,'stats':node.cloud_stats,'age':time.monotonic()-node.cloud_time if node.cloud_time else None}
                 self.reply(200,result)
             elif path=='/camera.jpg':
                 with node.lock:image=node.jpeg
