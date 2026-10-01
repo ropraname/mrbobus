@@ -36,7 +36,7 @@ def launch_nodes(context):
     description = xacro.process_file(str(share / 'description/control.urdf.xacro'),
                                     mappings={**gains, 'set_gains': 'false' if gain_profile == 'existing' else 'true', 'can': interface, 'lock_path': lock,
                                               'stop_file': '/run/mrbobus-stop/enabled' if interface == 'can0' else LaunchConfiguration('stop_file').perform(context),
-                                              'max_velocity_rad_s': '4.5' if profile == 'floor' else '0.6283185307179586',
+                                              'max_velocity_rad_s': '14.0' if profile == 'floor' else '0.6283185307179586',
                                               'current_limit': LaunchConfiguration('current_limit').perform(context)}).toxml()
     state = Node(package='robot_state_publisher', executable='robot_state_publisher',
                  parameters=[{'robot_description': description}])

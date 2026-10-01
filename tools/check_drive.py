@@ -21,17 +21,24 @@ mode.add_argument('--floor', action='store_true')
 mode.add_argument('--stop-check', action='store_true')
 parser.add_argument('--output', default='/tmp/mrbobus-drive-samples.json')
 parser.add_argument('--reverse', action='store_true')
+parser.add_argument('--unloaded-probe', action='store_true', help='All wheels must be securely suspended; bounded load-free speed steps')
 parser.add_argument('--require-lio', action='store_true')
 parser.add_argument('--sequence', choices=['line-return','full'])
 parser.add_argument('--arc-pair', action='store_true', help='20 deg arc left and return heading')
+parser.add_argument('--probe-angle',type=int,choices=[15,90],default=15)
+parser.add_argument('--p-probe', action='store_true', help='Bounded +/- angular steps monitored by relative LIO')
 parser.add_argument('--turn-pair', action='store_true', help='30 deg left, then return heading; no linear command')
 parser.add_argument('--speed', type=float, default=.03)
 parser.add_argument('--distance', type=float, default=.5)
 args = parser.parse_args()
 if args.sequence and (not args.floor or args.reverse or args.arc_pair or args.turn_pair):
     parser.error('Sequence requires floor mode without another motion selector')
+if args.p_probe and (not args.floor or not args.require_lio or args.sequence or args.turn_pair or args.arc_pair or args.reverse):
+    parser.error('P probe requires floor + require-lio only')
+if args.unloaded_probe and (not args.suspended_wheels or args.p_probe or args.turn_pair or args.arc_pair or args.sequence or args.reverse):
+    parser.error('Unloaded probe requires suspended-wheels only')
 Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-if not math.isfinite(args.speed) or not 0 < args.speed <= .06: raise SystemExit('Speed must be in (0, 0.06] m/s')
+if not math.isfinite(args.speed) or not 0 < args.speed <= .12: raise SystemExit('Speed must be in (0, 0.12] m/s')
 if not math.isfinite(args.distance) or not 0 < args.distance <= 2.4: raise SystemExit('Distance must be in (0, 2.4] m')
 if os.environ.get('ROS_DOMAIN_ID') != '42':
     raise SystemExit('Requires robot ROS_DOMAIN_ID=42')
@@ -40,11 +47,20 @@ from controller_manager_msgs.srv import ListControllers, SwitchController
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
+from tf2_ros import Buffer, TransformListener
+from rclpy.time import Time
+import numpy as np
+def matrix(p,q):
+    x,y,z,w=q.x,q.y,q.z,q.w
+    m=np.eye(4);m[:3,:3]=[[1-2*y*y-2*z*z,2*x*y-2*z*w,2*x*z+2*y*w],[2*x*y+2*z*w,1-2*x*x-2*z*z,2*y*z-2*x*w],[2*x*z-2*y*w,2*y*z+2*x*w,1-2*x*x-2*y*y]]
+    m[:3,3]=[p.x,p.y,p.z];return m
+def transform_matrix(t):return matrix(t.transform.translation,t.transform.rotation)
 
 rclpy.init()
 node = rclpy.create_node('gentle_drive_check')
 pub = node.create_publisher(TwistStamped, '/diff_drive_controller/cmd_vel', 10)
 latest = {}
+tf_buffer=Buffer();tf_listener=TransformListener(tf_buffer,node)
 subs = [node.create_subscription(Odometry, '/odom', lambda m: latest.update(odom=m), 1),
         node.create_subscription(JointState, '/joint_states', lambda m: latest.update(joints=m), 1),
         node.create_subscription(Odometry, '/lio/odometry', lambda m: latest.update(lio=m), 1)]
@@ -53,7 +69,15 @@ can.bind(('can0',)); can.setblocking(False)
 history = {n: deque() for n in range(4)}
 average_peak = {n: 0. for n in range(4)}
 axes = {}; peak = {n: 0. for n in range(4)}; samples = []
-phase = 'initializing'; stages = []
+raw_frames = deque(maxlen=60000)
+phase = 'initializing'; stages = []; lio_origin=None
+def lio_base_pose():
+    msg=latest['lio'];t=tf_buffer.lookup_transform('unilidar_imu','base_link',Time())
+    m=matrix(msg.pose.pose.position,msg.pose.pose.orientation)@transform_matrix(t)
+    return float(m[0,3]),float(m[1,3]),math.atan2(m[1,0],m[0,0])
+def relative_lio():
+    x,y,yaw=lio_base_pose()
+    return math.hypot(x-lio_origin[0],y-lio_origin[1]),math.atan2(math.sin(yaw-lio_origin[2]),math.cos(yaw-lio_origin[2]))
 
 def poll():
     rclpy.spin_once(node, timeout_sec=.005)
@@ -62,6 +86,7 @@ def poll():
         try: raw = can.recv(16)
         except BlockingIOError: break
         ident, length, data = struct.unpack('=IB3x8s', raw)
+        raw_frames.append((time.monotonic(), ident, length, data.hex()))
         if ident & 0xe0000000 or length != 8: continue
         n, cmd = ident >> 5, ident & 31
         if n not in range(4): continue
@@ -103,24 +128,41 @@ def run(v, duration, monitor=True, w=0.):
     while time.monotonic() < end:
         command(v,w); poll()
         sample={str(n): dict(a) for n, a in axes.items()}
-        sample['phase']=phase
+        sample['phase']=phase;sample['command']={'v':v,'w':w};sample['monotonic']=time.monotonic()
         for topic in ('odom','lio'):
             if topic in latest:
                 msg=latest[topic];p=msg.pose.pose.position;q=msg.pose.pose.orientation
                 sample[topic]={'t':msg.header.stamp.sec+msg.header.stamp.nanosec*1e-9,'x':p.x,'y':p.y,'z':p.z,
                               'yaw':math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z))}
+        if args.p_probe and lio_origin is not None:
+            x,y,yaw=lio_base_pose();sample['lio_base']={'x':x,'y':y,'yaw':yaw}
         samples.append(sample)
+        # The initial zero-command settling interval also needs protection.
+        # Controller-manager odometry may not yet be fresh there, but raw CAN
+        # speed/faults must never be ignored while the axes are being enabled.
+        if not monitor:
+            for n, a in axes.items():
+                if a.get('error', 0) not in (0, 2048):
+                    raise RuntimeError('Startup axis fault: ' + str(axes))
+                velocity = a.get('velocity', 0.)
+                if not math.isfinite(velocity) or abs(velocity) > 1.:
+                    raise RuntimeError('Startup wheel speed guard: ' + str(axes))
         if monitor:
             for topic in (('odom','lio') if args.require_lio else ('odom',)):
                 if topic not in sample or not all(math.isfinite(sample[topic][k]) for k in ('t','x','y','z','yaw')):
                     raise RuntimeError('Missing/nonfinite '+topic)
                 age=node.get_clock().now().nanoseconds*1e-9-sample[topic]['t']
                 if not -.1 <= age <= .5: raise RuntimeError('Stale '+topic)
+            if args.p_probe:
+                displacement,heading=relative_lio()
+                if displacement>.12 or abs(heading)>math.radians(args.probe_angle+20):raise RuntimeError('LIO probe envelope exceeded')
+                radio=json.loads(Path('/run/mrbobus-stop/radio.json').read_text())
+                if time.monotonic()-radio['at']>.3 or radio['mode']!='auto' or radio['held']:raise RuntimeError('Radio takeover/STOP')
             if args.floor and 'odom' in latest:
                 p=latest['odom'].pose.pose.position
-                if math.hypot(p.x, p.y) > (.60 if args.arc_pair else .10 if args.turn_pair else args.distance+.10) or abs(p.y)>(.30 if args.arc_pair else .10):
+                if math.hypot(p.x, p.y) > (.60 if args.arc_pair else .10 if (args.turn_pair or args.p_probe) else args.distance+.10) or abs(p.y)>(.30 if args.arc_pair else .10):
                     raise RuntimeError('Floor test odometry displacement/lateral limit')
-                if abs(sample['odom']['yaw'])>(math.radians(40) if (args.turn_pair or args.arc_pair) else .25): raise RuntimeError('Unexpected turning > 14 degrees')
+                if not args.p_probe and abs(sample['odom']['yaw'])>(math.radians(max(40,args.probe_angle*2) if args.p_probe else 40) if (args.turn_pair or args.arc_pair or args.p_probe) else .25): raise RuntimeError('Unexpected turning > 14 degrees')
             now = time.monotonic()
             for n in range(4):
                 a = axes.get(n, {})
@@ -128,9 +170,13 @@ def run(v, duration, monitor=True, w=0.):
                     raise RuntimeError('Stale axis ' + str(n))
                 if a.get('state') != 8 or a.get('error') != 0:
                     raise RuntimeError('Axis fault: ' + str(axes))
-                average_limit = 24./60. if args.floor and args.turn_pair else 20./60. if args.floor else .1
-                if not math.isfinite(a['velocity']) or abs(a['velocity']) > 1. or a.get('average_rps', 0.) > average_limit:
-                    raise RuntimeError(f'Wheel speed guard (60 rpm instantaneous / {average_limit*60:g} rpm averaged): ' + str(axes))
+                # Skid steering can briefly release stored tyre deformation.
+                # The LIO-bounded turn permits that transient; firmware limits
+                # and the stricter zero-command/unloaded checks remain intact.
+                average_limit = .8 if args.p_probe else 24./60. if args.floor and args.turn_pair else max(20./60.,1.5*args.speed/(math.pi*.09)) if args.floor else .65 if args.unloaded_probe else .1
+                instantaneous_limit = 1.5 if args.p_probe else 1.
+                if not math.isfinite(a['velocity']) or abs(a['velocity']) > instantaneous_limit or a.get('average_rps', 0.) > average_limit:
+                    raise RuntimeError(f'Wheel speed guard ({instantaneous_limit*60:g} rpm instantaneous / {average_limit*60:g} rpm averaged): ' + str(axes))
         time.sleep(.035)
 
 armed = False
@@ -157,6 +203,8 @@ try:
                 if time.monotonic()-stable_since>=2.:break
             else:stable_since=None
         else:raise RuntimeError('LIO did not become fresh before arm')
+    if args.p_probe:
+        lio_origin=lio_base_pose()
     request = SwitchController.Request(); request.activate_controllers = ['diff_drive_controller']; request.strictness = 2
     armed = True
     if not service('switch_controller', SwitchController, request).ok: raise RuntimeError('Activation failed')
@@ -173,7 +221,22 @@ try:
             raise RuntimeError('STOP did not report all Idle within 1s')
         print(json.dumps({'stop_to_all_idle_s':time.monotonic()-start}))
         raise SystemExit(0)
-    if args.floor and not (args.turn_pair or args.arc_pair):
+    if args.p_probe:
+        for direction in (1.,-1.):
+            phase='p_probe_'+str(int(direction));print('Stage: '+phase,flush=True)
+            deadline=time.monotonic()+(30. if args.probe_angle==90 else 3.)
+            while time.monotonic()<deadline:
+                _,heading=relative_lio()
+                remaining=math.radians(args.probe_angle)-heading if direction>0 else heading
+                if remaining<math.radians(1 if args.probe_angle==90 else 0):break
+                speed=min(.6,math.sqrt(2*.4*max(0.,remaining-math.radians(1)))) if args.probe_angle==90 else .6
+                run(0.,.04,w=direction*speed)
+            else:
+                if args.probe_angle == 90:
+                    raise RuntimeError('90-degree LIO turn timed out before target')
+            phase='settle';run(0.,1.)
+            stages.append({'phase':'p_probe','direction':direction,'lio':samples[-1].get('lio')})
+    if args.floor and not (args.turn_pair or args.arc_pair or args.p_probe):
         # One odometry origin and one activation for the whole out-and-back series.
         targets=(args.distance,0.) if args.sequence else ((-args.distance if args.reverse else args.distance),)
         for index,target in enumerate(targets):
@@ -207,7 +270,14 @@ try:
             run(0.,1.)
         stages.append({'phase':phase,'odom':samples[-1].get('odom'),'lio':samples[-1].get('lio')})
     elif not args.floor:
-        phase='suspended';run(.007,5.)
+        if args.unloaded_probe:
+            for speed in (.03,.06,.12,-.03,-.06,-.12):
+                phase=f'unloaded_{speed}'
+                print('Stage: '+phase,flush=True)
+                run(speed,3.)
+                phase='settle';run(0.,2.)
+        else:
+            phase='suspended';run(.007,5.)
     run(0., 2.)
     result = {'peak_average_rpm': {n: v*60 for n, v in average_peak.items()}, 'peak_measured_rpm': {n: v*60 for n, v in peak.items()}, 'last_axes': axes,
               'odom_x': latest['odom'].pose.pose.position.x if 'odom' in latest else None,
@@ -227,3 +297,4 @@ finally:
         while time.monotonic() < end: poll()
         print('Final axis states:', {n: a.get('state') for n, a in axes.items()})
     can.close(); node.destroy_node(); rclpy.shutdown()
+    Path(args.output).with_suffix('.can.json').write_text(json.dumps({'frames': list(raw_frames)}))

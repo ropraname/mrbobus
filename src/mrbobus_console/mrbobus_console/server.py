@@ -1,5 +1,6 @@
 """Bounded LAN console: ROS commands only; CAN listener is strictly passive."""
 import argparse,json,math,os,signal,socket,struct,subprocess,threading,time,uuid
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +19,8 @@ from tf2_ros import Buffer,TransformListener
 from .control import MotionGate
 from .field_map import FieldMap
 from .navigation import Navigation
+from .mission import Mission
+from .radio import RadioBridge, allow_source, read_radio
 
 ROOT=Path('/home/taras/robot/mrbobus_ws')
 STOP_URL='http://192.168.67.149:8081'
@@ -34,18 +37,21 @@ def transform_matrix(t):return matrix(t.transform.translation,t.transform.rotati
 class Console(Node):
     def __init__(self,args):
         super().__init__('mrbobus_console');self.args=args;self.gate=MotionGate();self.lock=threading.RLock();self.operation=threading.Lock();self.running=True
-        self.field_map=FieldMap('/home/taras/robot/records/maps/field-20260928');self.iq={}
-        self.pose=None;self.pose_source=None;self.pose_time=0.;self.pose_matrix=None;self.lio_time=0.;self.wheel_pose=None
+        self.field_map=FieldMap(os.environ.get('MRBOBUS_MAP_DIR','/home/taras/robot/records/maps/field-20260928'));self.iq={}
+        self.pose=None;self.pose_source=None;self.pose_time=0.;self.pose_matrix=None;self.lio_time=0.;self.lio_previous=None;self.lio_fault=None;self.wheel_pose=None
         self.cloud_frames=[];self.cloud_stats={};self.points=[];self.cloud_time=0.;self.cloud_processed=0.;self.cloud_hz=0.;self.previous_cloud=None;self.trace=[];self.axes={};self.voltage={}
         self.jpeg=None;self.camera_time=0.;self.camera_error='Подключение камеры';self.camera_process=None;self.lio_process=None;self.recorder=None
         self.session=datetime.now().strftime('field-%Y%m%d-%H%M%S');self.folder=Path(args.records)/self.session;self.marks=[];self.segment=0;self.record_error=None
         self.pub=self.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
         self.navigation=Navigation(self)
+        self.mission=Mission(self,ROOT/"src/mrbobus_console/config/semantic-map.yaml")
         self.camera_pub=self.create_publisher(CompressedImage,'/camera/image/compressed',qos_profile_sensor_data)
         self.tf=Buffer();self.listener=TransformListener(self.tf,self)
         self.subs=[self.create_subscription(PointCloud2,'/unilidar/cloud',self.cloud,qos_profile_sensor_data),self.create_subscription(Odometry,'/lio/odometry',self.lio,qos_profile_sensor_data),self.create_subscription(Odometry,'/odom',self.wheel,qos_profile_sensor_data)]
         self.list_client=self.create_client(ListControllers,'/controller_manager/list_controllers');self.switch_client=self.create_client(SwitchController,'/controller_manager/switch_controller')
         threading.Thread(target=self.camera,daemon=True).start();threading.Thread(target=self.can_listener,daemon=True).start()
+        self.control_warm=False
+        self.radio_bridge=RadioBridge(self)
     def pose_set(self,m,source):
         with self.lock:
             if self.pose_source!=source:self.trace=[]
@@ -61,7 +67,17 @@ class Console(Node):
             m=matrix(msg.pose.pose.position,msg.pose.pose.orientation)@transform_matrix(t)
             age=self.get_clock().now().nanoseconds/1e9-msg.header.stamp.sec-msg.header.stamp.nanosec/1e9
             if not -.1<=age<=.5:return
-            self.lio_time=time.monotonic();self.pose_set(m,'LIO')
+            now=time.monotonic()
+            if self.lio_fault:return
+            previous=self.lio_previous
+            jump=previous is not None and np.linalg.norm(m[:3,3]-previous[1])>max(.15,2.*(now-previous[0]))
+            if not np.isfinite(m).all() or np.linalg.norm(m[:3,3])>30 or jump:
+                self.lio_fault='Недопустимый скачок LIO; требуется сброс локализации'
+                self.lio_time=0.
+                with self.field_map.lock:self.field_map.quality=None;self.field_map.alignment=None
+                self.navigation.cancel();self.gate.stop();self.zero()
+                return
+            self.lio_previous=(now,m[:3,3].copy());self.lio_time=now;self.pose_set(m,'LIO')
         except Exception:pass
     def wheel(self,msg):
         self.wheel_pose=msg
@@ -111,37 +127,75 @@ class Console(Node):
     def zero(self):
         msg=TwistStamped();msg.header.stamp=self.get_clock().now().to_msg();self.pub.publish(msg)
     def stop(self):
+        if hasattr(self,"mission"):self.mission.cancel()
         self.navigation.cancel();self.gate.stop();self.zero();stop_request('/stop')
         return {'ok':True}
-    def arm(self,owner):
+    def arm(self,owner,radio=False):
         with self.operation:
+            if not allow_source(radio):raise ValueError('Источник управления запрещён режимом ELRS или STOP')
             epoch=self.gate.begin_arm(owner)
             try:
-                # Diagnostics occur once per explicit arm, while the CAN owner is stopped.
-                subprocess.run(['sudo','-n','systemctl','stop','mrbobus-control','robot-base'],check=True,timeout=6)
-                subprocess.run(['sudo','-n','install','-d','-o','taras','-g','taras','/run/robot-base'],check=True,timeout=3)
-                result=subprocess.run(['python3',str(ROOT/'tools/read_bus.py')],capture_output=True,text=True,timeout=3)
-                if result.returncode:raise ValueError('Проверка осей/питания не пройдена: '+result.stdout[-160:]+result.stderr[-160:])
-                self.gate.check_epoch(epoch)
-                Path('/run/mrbobus-stop/control.env').write_text('DRIVE_GAIN_PROFILE=baseline\nDRIVE_CURRENT_LIMIT=20\n')
-                stop_request('/ready');self.gate.check_epoch(epoch)
-                subprocess.run(['sudo','-n','systemctl','start','mrbobus-control'],check=True,timeout=6)
-                deadline=time.monotonic()+12
-                while time.monotonic()<deadline:
-                    self.gate.check_epoch(epoch)
-                    result=self.call(self.list_client,ListControllers.Request(),max(.1,deadline-time.monotonic()))
+                if getattr(self,'control_warm',False):
+                    # STOP left the hardware configured and Idle. Reset the
+                    # controller's command history without restarting ROS/CAN.
+                    self.zero()
+                    result=self.call(self.list_client,ListControllers.Request(),1.)
                     state=next((x.state for x in result.controller if x.name=='diff_drive_controller'),None)
-                    if state=='inactive':break
-                    time.sleep(.1)
-                else:raise ValueError('Контроллер не готов')
+                    if state=='active':
+                        req=SwitchController.Request();req.deactivate_controllers=['diff_drive_controller'];req.strictness=2
+                        if not self.call(self.switch_client,req,1.).ok:raise ValueError('Не удалось отключить контроллер')
+                    elif state!='inactive':raise ValueError('Контроллер требует повторной инициализации')
+                    deadline=time.monotonic()+.7
+                    while time.monotonic()<deadline:
+                        self.gate.check_epoch(epoch)
+                        with self.lock:
+                            idle=len(self.axes)==4 and all(a['state']==1 and a['error'] in (0,2048) and time.monotonic()-a['at']<.5 for a in self.axes.values())
+                        if idle:break
+                        time.sleep(.01)
+                    else:raise ValueError('Оси не подтвердили нейтраль')
+                    stop_request('/ready');self.gate.check_epoch(epoch)
+                else:
+                    # Diagnostics occur once per explicit arm, while the CAN owner is stopped.
+                    subprocess.run(['sudo','-n','systemctl','stop','mrbobus-control','robot-base'],check=True,timeout=6)
+                    subprocess.run(['sudo','-n','install','-d','-o','taras','-g','taras','/run/robot-base'],check=True,timeout=3)
+                    result=subprocess.run(['python3',str(ROOT/'tools/read_bus.py')],capture_output=True,text=True,timeout=3)
+                    if result.returncode:raise ValueError('Проверка осей/питания не пройдена: '+result.stdout[-160:]+result.stderr[-160:])
+                    self.gate.check_epoch(epoch)
+                    Path('/run/mrbobus-stop/control.env').write_text('DRIVE_GAIN_PROFILE=mixed_drive\nDRIVE_CURRENT_LIMIT=20\n')
+                    stop_request('/ready');self.gate.check_epoch(epoch)
+                    subprocess.run(['sudo','-n','systemctl','start','mrbobus-control'],check=True,timeout=6)
+                    deadline=time.monotonic()+12
+                    while time.monotonic()<deadline:
+                        self.gate.check_epoch(epoch)
+                        result=self.call(self.list_client,ListControllers.Request(),max(.1,deadline-time.monotonic()))
+                        state=next((x.state for x in result.controller if x.name=='diff_drive_controller'),None)
+                        if state=='inactive':break
+                        time.sleep(.1)
+                    else:raise ValueError('Контроллер не готов')
                 self.zero();self.gate.check_epoch(epoch)
                 req=SwitchController.Request();req.activate_controllers=['diff_drive_controller'];req.strictness=2
                 if not self.call(self.switch_client,req).ok:raise ValueError('Не удалось включить привод')
-                self.gate.finish_arm(epoch);return {'ok':True}
+                # Controller activation returns before all ODrive heartbeats
+                # acknowledge Closed Loop. Keep the command gate shut meanwhile.
+                deadline=time.monotonic()+1.
+                while time.monotonic()<deadline:
+                    self.gate.check_epoch(epoch)
+                    with self.lock:
+                        confirmed=len(self.axes)==4 and all(a['state']==8 and not a['error'] and time.monotonic()-a['at']<.5 for a in self.axes.values())
+                    if confirmed:break
+                    self.zero();time.sleep(.02)
+                else:raise ValueError('Оси не подтвердили включение')
+                if not allow_source(radio):raise ValueError('Режим ELRS изменился при включении')
+                if radio:
+                    rc=read_radio()
+                    if not rc or rc['throttle'] != 0 or rc['steering'] != 0:raise ValueError('Газ в ноль, поворот в центр')
+                self.gate.finish_arm(epoch);self.control_warm=True;return {'ok':True}
             except Exception:
+                self.control_warm=False
                 self.stop();raise
-    def command(self,data):
+    def command(self,data,radio=False):
         with self.gate.lock:
+            if not allow_source(radio):raise ValueError('Команды этого источника запрещены режимом ELRS')
             self.navigation.cancel()
             v,w=self.gate.command(data.get('client'),data.get('v',0),data.get('w',0),data.get('seq'))
             if Path('/run/mrbobus-stop/enabled').read_text().strip()!='1':raise ValueError('STOP зафиксирован')
@@ -157,6 +211,25 @@ class Console(Node):
         if self.gate.active:raise ValueError('Для инициализации LIO сначала останови привод')
         self.folder.mkdir(parents=True,exist_ok=True)
         with (self.folder/'lio.log').open('ab') as log:self.lio_process=subprocess.Popen(['ros2','launch','mrbobus_lio','l2_lio.launch.py'],stdout=log,stderr=log,start_new_session=True)
+    def maintenance(self,action):
+        self.stop()
+        with self.operation:
+            if action=='localization':
+                self.end_process(self.lio_process);self.lio_process=None
+                subprocess.run(['sudo','-n','systemctl','restart','unitree-l2'],check=True,timeout=12)
+                with self.field_map.lock:self.field_map.alignment=None;self.field_map.quality=None
+                with self.lock:self.lio_time=0.;self.lio_previous=None;self.lio_fault=None;self.pose_time=0.;self.pose_matrix=None;self.pose=None;self.cloud_frames=[];self.points=[];self.trace=[]
+                self.start_lio()
+                return {'ok':True,'message':'LIO перезапущена. Нужна новая привязка к карте.'}
+            if action=='odrive':
+                subprocess.run(['sudo','-n','systemctl','stop','mrbobus-control','robot-base'],check=True,timeout=12)
+                self.control_warm=False
+                subprocess.run(['sudo','-n','install','-d','-o','taras','-g','taras','/run/robot-base'],check=True,timeout=3)
+                r=subprocess.run(['python3',str(ROOT/'tools/read_bus.py'),'--errors','--clear-known-overspeed'],capture_output=True,text=True,timeout=5)
+                if r.returncode:raise ValueError((r.stderr or r.stdout)[-450:])
+                subprocess.run(['sudo','-n','systemctl','start','mrbobus-control'],check=True,timeout=8)
+                return {'ok':True,'message':'Известная ошибка сброшена; привод остаётся выключенным.','details':r.stdout}
+        raise ValueError('Неизвестное действие')
     def record(self,enabled):
         with self.operation:
             if enabled:
@@ -196,6 +269,12 @@ class Console(Node):
             with self.lock:
                 if self.pose_source!='LIO' or time.monotonic()-self.pose_time>.5:raise ValueError('Нет свежей LIO-позы')
                 current=self.pose_matrix.copy();cloud=list(self.points)
+            if action=='start':return self.field_map.set_pose(self.mission.config['start'],current)
+            if action=='confirm':
+                with self.field_map.lock:
+                    if self.field_map.alignment is None:raise ValueError('Сначала поставьте позу на карте')
+                    self.field_map.quality={'method':'подтверждено оператором','verified':True,'manual':True}
+                return {'ok':True}
             if action=='pose':return self.field_map.set_pose(data,current)
             if action=='refine':return self.field_map.refine(cloud,current)
         raise ValueError('Неизвестное действие карты')
@@ -205,9 +284,9 @@ class Console(Node):
         except OSError:ready=False
         with self.gate.lock,self.lock:
             active=self.gate.active and ready and len(self.axes)==4 and all(x['state']==8 and x['error']==0 and now-x['at']<.5 for x in self.axes.values())
-            return {'navigation':{'active':self.navigation.active,'message':self.navigation.message,'path':self.navigation.path},'map':self.field_map.status(self.pose_matrix,self.pose_source=='LIO' and now-self.pose_time<.5),'iq':{k:{**v,'age':now-v['at']} for k,v in self.iq.items()},'current_limit':20,'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
+            return {'lio_fault':self.lio_fault,'radio':read_radio(),'radio_error':self.radio_bridge.error,'navigation':{'ground':self.navigation.ground_status,'ground_age':now-self.navigation.ground_time,'active':self.navigation.active,'message':self.navigation.message,'path':self.navigation.path},'map':self.field_map.status(self.pose_matrix,self.pose_source=='LIO' and now-self.pose_time<.5),'iq':{k:{**v,'age':now-v['at']} for k,v in self.iq.items()},'current_limit':20,'active':active,'ready':ready,'owner':self.gate.owner,'pose':self.pose,'pose_source':self.pose_source,'pose_age':now-self.pose_time if self.pose_time else None,'lio_age':now-self.lio_time if self.lio_time else None,'cloud_age':now-self.cloud_time if self.cloud_time else None,'cloud_hz':round(self.cloud_hz,1),'camera_age':now-self.camera_time if self.camera_time else None,'camera_error':self.camera_error,'axes':{k:{**v,'age':now-v['at']} for k,v in self.axes.items()},'voltage':{k:{'value':v[0],'age':now-v[1]} for k,v in self.voltage.items()},'recording':bool(self.recorder and self.recorder.poll() is None),'session':self.session,'segment':self.segment,'marks':self.marks,'trace':self.trace[-1200:]}
     def camera(self):
-        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','640x480','-framerate','30','-i',self.args.camera,'-vf','fps=5,hflip','-c:v','mjpeg','-q:v','3','-threads','1','-f','image2pipe','pipe:1']
+        command=['ffmpeg','-nostdin','-loglevel','error','-f','v4l2','-input_format','mjpeg','-video_size','1280x960','-framerate','5','-i',self.args.camera,'-c:v','copy','-f','image2pipe','pipe:1']
         while self.running:
             try:
                 self.camera_process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True);buffer=b'';last=0.
@@ -228,15 +307,30 @@ class Console(Node):
     def can_listener(self):
         try:
             s=socket.socket(socket.AF_CAN,socket.SOCK_RAW,socket.CAN_RAW);s.bind(('can0',));s.settimeout(.5)
+            recent=deque(maxlen=4096);last_fault={}
             while self.running:
                 try:raw=s.recv(16)
                 except socket.timeout:continue
                 ident,length,data=struct.unpack('=IB3x8s',raw)
+                recent.append((time.monotonic(),ident,length,data.hex()))
                 if ident&0xe0000000 or length!=8:continue
                 n,cmd=ident>>5,ident&31
                 if n not in range(4):continue
                 with self.lock:
-                    if cmd==1:self.axes[str(n)]={'state':data[4],'error':struct.unpack_from('<I',data)[0],'at':time.monotonic()}
+                    if cmd==1:
+                        error=struct.unpack_from('<I',data)[0]
+                        self.axes[str(n)]={'state':data[4],'error':error,'at':time.monotonic()}
+                        fault=error & ~2048
+                        if fault and last_fault.get(n)!=fault:
+                            frames=list(recent)
+                            def save(frames=frames,node=n,error=error):
+                                try:
+                                    folder=Path(self.args.records)/'diagnostics';folder.mkdir(parents=True,exist_ok=True)
+                                    target=folder/f'can-fault-{time.time_ns()}-axis{node}.json'
+                                    target.write_text(json.dumps({'axis':node,'axis_error':error,'frames':frames}))
+                                except OSError as e:self.get_logger().warning('CAN fault recording: '+str(e))
+                            threading.Thread(target=save,daemon=True).start()
+                        last_fault[n]=fault
                     elif cmd==20:self.iq[str(n)]={'target':struct.unpack_from('<f',data)[0],'measured':struct.unpack_from('<f',data,4)[0],'at':time.monotonic()}
                     elif cmd==23:self.voltage[str(n)]=(struct.unpack_from('<f',data)[0],time.monotonic())
             s.close()
@@ -259,7 +353,10 @@ def main():
             except (BrokenPipeError,ConnectionResetError):pass
         def do_GET(self):
             path=self.path.split('?')[0]
-            if path in ('/','/app.js','/map.js','/style.css'):
+            if path in ('/mission','/mission.js'):
+                name='mission.html' if path=='/mission' else 'mission.js';self.reply(200,(Path(args.web)/name).read_bytes(),'text/html; charset=utf-8' if path=='/mission' else 'text/javascript')
+            elif path=='/api/mission':self.reply(200,node.mission.status())
+            elif path in ('/','/app.js','/map.js','/style.css'):
                 name={'/':'index.html','/app.js':'app.js','/map.js':'map.js','/style.css':'style.css'}[path];content={'/':'text/html; charset=utf-8','/app.js':'text/javascript','/map.js':'text/javascript','/style.css':'text/css'}[path];self.reply(200,(Path(args.web)/name).read_bytes(),content)
             elif path=='/api/map':self.reply(200,node.field_map.data) if node.field_map.data else self.reply(404,{'error':'Нет карты'})
             elif path=='/api/status':self.reply(200,node.status())
@@ -274,10 +371,14 @@ def main():
             if self.headers.get('Origin')!=origin:self.reply(403,{'error':'Wrong origin'});return
             try:
                 size=int(self.headers.get('Content-Length','0'))
-                if not 0<size<=2048:raise ValueError('Invalid request')
+                if not 0<size<=12000:raise ValueError('Invalid request')
                 data=json.loads(self.rfile.read(size))
                 if not isinstance(data,dict):raise ValueError('JSON object required')
-                if self.path.startswith('/api/map/') :result=node.map_action(self.path.rsplit('/',1)[-1],data)
+                if self.path=='/api/mission/start':result=node.mission.start(data.get('prompt'),data.get('execute',True) is True)
+                elif self.path=='/api/mission/resume':result=node.mission.start(node.mission.last_prompt,resume=True)
+                elif self.path=='/api/mission/restart':result=node.mission.start(node.mission.last_prompt)
+                elif self.path.startswith('/api/maintenance/'):result=node.maintenance(self.path.rsplit('/',1)[-1])
+                elif self.path.startswith('/api/map/') :result=node.map_action(self.path.rsplit('/',1)[-1],data)
                 elif self.path=='/api/stop':result=node.stop()
                 elif self.path=='/api/arm':result=node.arm(data.get('client'))
                 elif self.path=='/api/cmd':result=node.command(data)

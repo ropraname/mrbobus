@@ -1,0 +1,6 @@
+# Offline tests and diagnostic plotting; ROS dependencies are installed via apt/rosdep.
+numpy>=1.26,<3
+scipy>=1.11,<2
+PyYAML>=6,<7
+matplotlib>=3.8,<4
+opencv-python-headless>=4.10,<5

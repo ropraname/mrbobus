@@ -15,3 +15,77 @@ low_i:
   rear_i: 0.25
   front_p: 0.106
   front_i: 0.08333333333333333
+# Reversal trial: stronger immediate response, less accumulated torque.
+responsive:
+  rear_p: 0.8
+  rear_i: 0.5
+  front_p: 0.424
+  front_i: 0.16666666666666666
+# Back off P after observed low-speed oscillation; retain reduced integral gain.
+reversal_soft:
+  rear_p: 0.2
+  rear_i: 0.5
+  front_p: 0.106
+  front_i: 0.16666666666666666
+# Isolate proportional response; re-arm from Idle clears prior integral state.
+p_only:
+  rear_p: 0.2
+  rear_i: 0.0
+  front_p: 0.106
+  front_i: 0.0
+# P-only bracketing candidates; ratio preserves configured torque constants.
+p_probe_mid:
+  rear_p: 0.5
+  rear_i: 0.0
+  front_p: 0.265
+  front_i: 0.0
+p_probe_high:
+  rear_p: 1.0
+  rear_i: 0.0
+  front_p: 0.53
+  front_i: 0.0
+p_probe_upper:
+  rear_p: 1.3
+  rear_i: 0.0
+  front_p: 0.689
+  front_i: 0.0
+turn_pi:
+  rear_p: 1.0
+  rear_i: 0.5
+  front_p: 0.53
+  front_i: 0.265
+
+# Algorithmic turn calibration candidate (RAM only).
+auto_turn:
+  rear_p: 1.0
+  rear_i: 0.75
+  front_p: 0.530000
+  front_i: 0.397500
+# Verified straight/turn compromise, Hall bandwidth30, 2026-09-29.
+mixed_drive:
+  rear_p: 0.5
+  rear_i: 0.75
+  front_p: 0.265
+  front_i: 0.3975
+# Diagnostic only: isolate P/filter stability without stored integral torque.
+unloaded_p_only:
+  rear_p: 0.5
+  rear_i: 0.0
+  front_p: 0.265
+  front_i: 0.0
+unloaded_low_p:
+  rear_p: 0.1
+  rear_i: 0.0
+  front_p: 0.053
+  front_i: 0.0
+# Experimental candidates; neither is accepted for normal driving.
+load_robust:
+  rear_p: 0.1
+  rear_i: 0.75
+  front_p: 0.053
+  front_i: 0.3975
+load_robust_low_i:
+  rear_p: 0.1
+  rear_i: 0.25
+  front_p: 0.053
+  front_i: 0.1325

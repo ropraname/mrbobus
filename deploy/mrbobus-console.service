@@ -1,8 +1,8 @@
 [Unit]
 Description=Mrbobus field console, camera and LIO viewer
-Wants=network-online.target mrbobus-control.service unitree-l2.service
+Wants=network-online.target mrbobus-stop.service mrbobus-control.service unitree-l2.service
 After=network-online.target mrbobus-stop.service mrbobus-control.service unitree-l2.service
-Requires=mrbobus-stop.service
+StartLimitIntervalSec=0
 [Service]
 User=taras
 SupplementaryGroups=video

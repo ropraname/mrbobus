@@ -353,3 +353,781 @@ CAN1 Motor UNKNOWN_TORQUE+UNKNOWN_VOLTAGE_COMMAND, CAN3 UNKNOWN_TORQUE.
 отправлен STOP, запись завершена, остановлены Nav2/console/control/L2,
 выполнены sync и штатный shutdown Pi. Продолжать физические тесты нельзя
 до следующего включения и подтверждения положения робота.
+
+## ELRS дома (29.09)
+
+Pi доступна по192.168.67.149. Приёмник CRSF420000 подключён к UART4 Pi5:
+жёлтый→физический32(TX/GPIO12), белый→33(RX/GPIO13). В config.txt добавлен
+uart4-pi5, исходник config.txt.before-elrs сохранён на Pi. Полная инструкция,
+каналы и поведение режимов: [docs/elrs.md](elrs.md).
+
+Подтверждённые каналы: CH1 поворот174/992/1811; CH3 газ≈180..225/1811;
+CH5 режим191AUTO/1792MANUAL; CH6 передачи191вперёд/997нейтраль/1792назад;
+CH8 STOP1792нажат/191отпущен. Левый стик без возврата, газ от нижнего нуля.
+Нейтраль и STOP снимают удержание (Idle), механического тормоза нет.
+
+В MANUAL веб-команды и Nav2 запрещены; в AUTO стики/передачи игнорируются,
+но STOP пульта действует. Последнее явное требование пользователя:
+отключение пульта переводит в AUTO и снимает именно radio STOP. Ручная
+команда обнуляется, текущий ручной привод останавливается; самовключения
+или возобновления старой цели нет. Веб-STOP независим. Если уже был AUTO,
+само отключение радио не прерывает автономку. Восстановление связи само
+не включает привод; нажатый переключатель вновь блокирует включение.
+
+Реализация: независимый mrbobus-stop читает UART, применяет radio_policy,
+пишет аппаратный stop flag и radio.json. Console RadioBridge выбирает
+источник команд и требует свежего состояния сервиса. Нулевой газ и центр
+поворота обязательны на всём этапе arm. Для включения — отпускание STOP
+с выбранной передачей или выбор передачи из нейтрали. Первое включение после запуска консоли проверяет питание и запускает
+контроллер; во время него FM=ARMING. Последующие используют деактивацию/
+активацию diff_drive_controller без перезапуска процесса. Gate открывается только после свежих
+heartbeat state8/error0 всех4осей; STOP отменяет ожидание. Пределы пульта увеличены до .50m/s/.60rad/s, плавный разгон .08m/s²/.8rad/s²,
+торможение .20m/s²/.8rad/s². Аппаратный cap14rad/s (fw3rev/s), ток20A/ось
+и момент2Nm сохранены; Nav2 по-прежнему .10m/s. Закрытие браузера не является deadman.
+
+CRSF1Hz: Batt0x08, состояние0x21, температура Pi0x0D. Пассивный CAN-приём
+имеющихся0x17/heartbeat, новых запросов нет. Vbat≈37V сейчас приходит с
+node0/1 одной платы; это не подтверждает напряжение второй платы.
+Ток батареи/mAh/% недоступны и передаются FF (EdgeTX unknown), Iq не
+подменяется током батареи. Пользователь подтвердил датчики на пульте.
+
+Проверки:45 unit-тестов (протокол, политика, STOP, источники команд,
+телеметрия, подтверждение arm, быстрый повторный arm, консоль). vcan43:
+STOP с новыми скоростями/20A PASS; снятие STOP без явного arm не включает
+моторы; повторный arm60ms без перезапуска. Error/stale-feedback тесты PASS. На роботе подтверждены отключение→AUTO/снятие radio STOP и
+подключение без самовключения. После исправления гонки heartbeat arm
+проверены включение с пульта, плавный передний ход, задний ход, поворот
+вправо; нейтраль переводит все4оси в Idle. Прямой STOP после движения
+ещё ожидает завершения пользователем. Физический Nav2-проезд не проверен.
+
+Локальные записи проверки: .local/elrs/manual-check.jsonl (не Git).
+Резервные копии Pi: .local/baselines/pre-elrs-20260929.tgz,
+pre-elrs-telemetry-20260929.tgz и server-before-axis-ack.py.
+
+Ускорение передач: обычный STOP теперь выполняет idle_all без hardware ERROR,
+сохраняя CAN owner; commanded=false исключает самовключение при снятии флага.
+Ошибки CAN/осей/обратной связи по-прежнему вызывают fault. На настоящем
+роботе после установки измерены: первый arm4.68s, последующие0.218s и0.126s.
+В старом медленном повороте зарегистрированы максимальные токи4.7–7A/ось,
+ниже20A; сам лимит тока не повышен. Пользователь подтвердил ход и поворот, но запросил больше скорости. Backup: pre-fast-gears-20260929.tgz и
+pre-fast-gears-plugin.so в .local/baselines/ Pi.
+
+
+После переезда препятствия node3 защёлкнула Controller OVERSPEED (0x1),
+с сопутствующими motor UNKNOWN_TORQUE/UNKNOWN_VOLTAGE_COMMAND (0x110000000).
+Ошибки считаны при остановленном владельце CAN, сохранены в
+records/diagnostics/overspeed-20260929-before-reset.json и явно сброшены
+в Idle; все четыре оси после сброса без ошибок. Причина пика скорости
+(реальная раскрутка или оценка Hall) пока не установлена.
+
+Порог Set_Limits Velocity_Limit повышен 2→3rev/s; защита overspeed сохранена.
+По просьбе пользователя предел пульта .30→.50m/s, аппаратный предел команды
+9→14rad/s; поворот .60rad/s, ток20A и плавный разгон сохранены.
+Console теперь сохраняет кольцевую историю последних4096 CAN-кадров при
+новой ошибке оси в records/diagnostics, без отправки CAN-запросов.
+Backup до изменения: pre-speed-margin-20260929.tgz и pre-speed-margin-plugin.so.
+Установлено на Pi; после перезапуска все оси Idle, только ожидаемый
+watchdog2048 при отключённом приводе, радио MANUAL/LQ97/газ0.
+vcan нового профиля PASS: пик2.078rev/s, warm arm61ms, самовключения нет;
+17 консольных unit-тестов и локальные5 тестов MotionGate PASS.
+Физический ход на .50m/s и повторный проезд препятствия ещё не проверены.
+
+Проверка задержки поворота: пассивный CAN двух повторов показал начало
+вращения колёс через0.78–0.90s от ненулевого setpoint, выход на .30rev/s
+через1.40s. Пики Iq3.3–6.1A, до20A далеко. Это не измерение начала
+разворота корпуса: его задержка требует сопоставления с LIO/видео.
+Угловой разгон .4→.8rad/s² установлен, vcan STOP/явный повторный arm PASS.
+Регуляторы скорости пока baseline; физический эффект изменения не проверен.
+
+Повторные реверсы с пульта записаны в .local/elrs/turn-reversal-can.jsonl
+и turn-reversal-status.jsonl. В трёх реверсах знак заданного Iq сменился
+через0.70–2.11s после смены CAN velocity setpoint; порог скорости колёс
+0.15rev/s в новом направлении достигнут через1.25–2.72s. В центре остаётся
+ненулевой Iq при неподвижных колёсах. Это согласуется с сохранённым
+интегральным моментом, который при реверсе сначала должен уменьшиться;
+лимит20A не достигается. Ускорение команды не устранило задержку.
+Источник pose в этой записи — колёсная одометрия, не LIO: задержка
+разворота корпуса независимо не измерена. Следующий шаг — настройка
+PI/компенсации трения с проверкой прямого хода и реверсов; не увеличение
+лимитов и не обход защиты. Настройки после этой записи не менялись.
+
+Профиль responsive установлен 29.09 после разрешения пользователя:
+rear P=.8/I=.5, front P=.424/I=1/6 (P×4, I×0.5 относительно baseline).
+Console выбирает его при cold arm, CAN Set_Vel_Gains при каждом arm.
+Оригинальный baseline сохранён; backup Pi pre-responsive-20260929.tgz.
+Ток20A, cap14rad/s, fw3rev/s и STOP не менялись. vcan domain43 проверил
+точные пары P/I всех4осей, STOP и явный rearm: PASS.17 unit-тестов PASS.
+После перезапуска моторы Idle. Реальная устойчивость/реверс на этом
+профиле пока не проверены; коэффициенты — кандидат, а не законченная настройка.
+
+responsive физически вызвал дрожание на малой скорости: пользователь
+подтвердил, CAN запись responsive-shudder-20260929.jsonl сохранена на Pi
+в records/diagnostics и локально .local/elrs. Повышенный P отменён:
+активный профиль после следующего arm — reversal_soft, rear .2/.5,
+front .106/1⁄6. Точные CAN gains/STOP/rearm проверены vcan PASS.
+USB подключена передняя плата553802557 (nodes2/3): Hall bandwidth100→30
+в RAM, чтение подтвердило обе оси. Backup .local/odrive-backups/20260929-015311-553802557.json.
+Флеш не сохраняли. Задняя плата пока bandwidth100; ожидается перестановка USB.
+Console/control остановлены на время USB-настройки, моторы Idle.
+
+Задняя плата587302779(nodes0/1) также настроена Hall bandwidth30 в RAM,
+чтение подтвердило обе оси; backup20260929-015357-587302779.json.
+Все4оси теперь bandwidth30 до отключения питания; flash не сохраняли.
+Console восстановлена disarmed. Пользователь уточнил: дрожь была лёгкой,
+не сильной раскачкой. Следующая проверка — малый ход и реверс на
+reversal_soft+bandwidth30; улучшение физически пока не подтверждено.
+
+Hall30+reversal_soft повтор: запись hall30-reversal.jsonl (Pi diagnostics,
+локальная .local/elrs). При положительном реверсе Iq меняет знак через
+1.66–2.35s, скорость колёс >.15rev/s через3.87–4.43s. При нулевой команде
+и практически нулевой скорости сохраняется Iq около2–4A. Уменьшение I
+замедлило смену накопленного усилия; текущая настройка не решает реверс.
+Нужна проверка управляемого сброса интегрального момента при остановке/
+реверсе и компенсации трения; очередное повышение лимитов не обосновано.
+После данного измерения параметры не менялись.
+
+
+Поиск аналогов ODrive (29.09), без изменения робота:
+- Почти точный аналог: https://discourse.odriverobotics.com/t/odrive-motor-tunning/7463
+  Hall, медленный рост тока перед препятствием, дрожь при повышении P;
+  рекомендация для точной малой скорости — энкодер выше разрешением.
+- https://discourse.odriverobotics.com/t/odrive-s1-motor-moves-after-releasing-it-even-with-zero-command/14130
+  накопление интегратора при блокировке, vel_integrator_limit; пример S1,
+  но наличие ограничения подтверждено исходником нашей fw0.5.6.
+- Официальная процедура fw0.5.6: https://raw.githubusercontent.com/odriverobotics/ODrive/fw-v0.5.6/docs/control.rst
+  I=0, P шагами примерно30% до дрожи, отступить до50%, затем настроить I.
+- https://discourse.odriverobotics.com/t/adventures-in-running-larger-hall-only-motors/4891
+  успешный Hall rover, bandwidth увеличивали до600; значения не переносить
+  на наши моторы. bandwidth30 — эксперимент, не универсальная рекомендация.
+- Friction feedforward — стандартный метод, но требует подбора:
+  https://www.kollmorgen.com/en-us/developer-network/Feed-Forward
+Следующая стратегия: раздельная настройка P при I=0 и свежем состоянии,
+затем I и его предел; сравнение прямого хода/поворота/реверса по одной
+изменяемой величине. FF — после определения ограничения базового PI.
+60HallCPR на90mm дают4.71mm пути на переход, при .01m/s около .47s между
+переходами; это не прямая оценка абсолютной точности LIO или положения корпуса.
+
+
+Автоматический подбор P на полу разрешён пользователем, пульт AUTO,
+пространство свободно, повороты90° разрешены. I=0, Hall30, ток20A.
+Короткие пробы: P rear/front .2/.106 и .5/.265 — колёса не тронулись;
+1/.53 — поворот18.5° и возврат по LIO, начало >2° за~1s;1.3/.689 —
+быстрее, но больше колебаний Iq и доворот после нуля. Рабочий кандидат1/.53.
+Граница устойчивых автоколебаний не установлена; это подбор P, не
+измеренный Ku/Tu и не завершённая настройка PID.
+В hardware validator допустимый P расширен1→2, остальные ограничения
+сохранены; build+vcan p_probe_upper PASS, backup before-p-upper-*.
+Runner --p-probe использует AUTO/STOP, свежую LIO и ограниченные угловые
+ступени. После первой90° пробы на65° сработал лимит смещения IMU;
+проверка исправлена на base_link через TF (датчик описывает дугу).
+Исправленный runner прошёл vcan; начата повторная проба90°.
+
+Повторная90° проба на P=1/.53,I=0 завершена:
+LIO(base_link) максимум92.31°, после возврата−3.18°, смещениецентра≤6.4cm.
+Начало >2° через.78/.89s, движение до целей17.78/14.37s; Iq≤5.82A.
+Это хороший старт без накопления, но большая ошибка скорости под нагрузкой.
+Начат следующий ограниченный PI-кандидат turn_pi: P=1/.53,I=.5/.265.
+
+PI90 с торможением по оставшемуся углу: turn_pi (rear P1/I.5,
+front P.53/I.265), Hall30. Проба20260929-022206: максимум89.42°,
+возврат−1.89°, время движения8.43/8.48s;
+критерий старта >2° дал.70/1.86s; Iq≤6.29A, всеосиIdle после теста.
+
+Добавлен tools/tune_turn_gains.py: ограниченный автоматический поиск
+по соседям P/I вокруг1/.5, одинаковые90° туда-обратно через штатный runner.
+Оценка заранее фиксирована: сумма времени движения+задержки старта,
+0.5s за градус ошибки остановки и1s за градус обратного лишнего движения
+(с шагом0.2s и шумовой зоной0.2°). Ошибка>5°/таймаут или отказ runner
+прерывают серию; STOP автоматически не снимается. Лучший кандидат и
+исходный повторяются; для замены требуется≥10% выигрыша средней оценки.
+Это локальный поиск на текущем покрытии, не идентификация Ku/Tu.
+Артефакты — .local/calibration и .local/trials, без росбагов вGit.
+
+Автопоиск20260929-022830 завершён:7 испытаний90° туда-обратно.
+Выбран auto_turn rear P1/I.75,front P.53/I.3975. Средняя целевая
+оценка16.622 против19.079 у turn_pi, выигрыш12.9%. Среднее время
+пары14.30 против15.92s, средняя абсолютная ошибка остановки.279°
+против.955° по LIO. Это относительная оценка LIO, не внешняя метрология.
+Конфиг и server.py с auto_turn развёрнуты на Pi. STOP включён, осиIdle.
+Пользователь отключает робота: финальный прямой ход НЕ выполнен.
+Hall30 на обеих платах всё ещё RAM-only; flash не сохраняли. После
+питания параметры Hall вернутся к сохранённым100: восстановить30 поUSB
+перед повторным испытанием/сохранением. Автопоиск не изменял лимит20A.
+Unit-test arm_ack в этой сессии не запущен успешно: отсутствовал rclpy
+в выбранном Python окружении; py_compile и проверки scoring прошли,
+семь физических испытаний завершились штатно.
+
+29.09 02:34: передняя ODrive553802557(nodes2/3), обе осиIdle,
+startup motor/calibration flags0. Hall30 прочитан, повторно установлен,
+команда ss отправлена. Backup20260929-023449-553802557.json.
+После ss USB исчез и пока не вернулся; сохранение во флеш ещё НЕ
+подтверждено чтением после перезапуска. Попытка sr не отправилась,
+т.к. устройства уже не было. Console/control остановлены, STOP включён.
+Задняя плата ещё не сохранялась. Требуется переподключить питание/USB
+передней и проверить readback, затем сохранить заднюю.
+
+29.09 02:47: после замены батареи подключена задняя587302779(nodes0/1).
+Hall100 заменён на30 на обеих осях, ss выполнен, затем явный sr reboot.
+Повторное чтение подтвердило Hall30 и Idle обеих осей — флеш проверена.
+Backup20260929-024656-587302779.json; readback587302779-hall30-after-reboot.json.
+Сохранённые прочие значения задней платы:current_lim38A,P.2/I1;
+штатный сервис при arm применяет рабочие20A и профильauto_turn изPi.
+Передняя553802557 пока требует проверки после питания. Console/control
+остановлены, STOP0; моторы не включались.
+
+29.09: передняя553802557 после замены батареи уже содержит Hall30:
+предыдущее ss сохранилось. Дополнительно выполнен явный sr и чтение:
+Hall30 на обеих осях, Idle. Артефакт553802557-hall30-after-reboot.json.
+ИТОГ: Hall bandwidth30 подтверждён во флеш ОБЕИХ плат, всех4осей.
+Восстановление Hall поUSB после питания больше не требуется.
+Console/control оставлены остановленными, моторы не включались.
+Прямой ход на auto_turn по-прежнему не проверен.
+
+29.09 02:57 auto_turn line-return .4m/.06m/s завершён штатно до
+обработки сообщения пользователя о рывках. STOP затем включён, всеIdle.
+LIO IMU displacement в начальном направлении base (yaw offset−pi/2):
+вперёд.406m, возвращение.0148m; боковое≤.016m, yaw≤.843°.
+Это координаты IMU, без поправки плеча; на этом малом угле оценка близка
+к движению корпуса. Пользователь наблюдал рывки прямо: плавность НЕ
+подтверждена. При постоянной команде.06m/s Hall velocity std.135–.170rev/s
+при средней абсолютной.18–.20rev/s; Iq≤4.14A, не лимит20A.
+Профиль auto_turn годится по выполненным угловым пробам, но не принят
+как универсальный: нужна доводка прямого хода и совместная оценка
+прямой/поворот. Новый поворот в этой сессии не запускался.
+
+29.09 03:03: единый профиль mixed_drive выбран после проверки прямого
+хода И поворота: rear P.5/I.75,front P.265/I.3975,Hall30,20A.
+Снижение P вдвое относительноauto_turn уменьшило средний std оценки
+Hall velocity примерно29% при.06m/s; пользователь подтвердил плавнее.
+Проба20260929-030132: .6m туда-обратно при.12m/s; LIO IMU displacement
+в направлении base .6011m, возврат−.0014m; боковое≤.033m,yaw≤.424°.
+Пользователь: небольшая дрожь на старте, середина плавная. Это не внешняя
+метрология и не доказательство миллиметровой точности/отсутствия вибрации.
+Проба20260929-030226:90° и возврат,6.21/7.32s,старт>2°1.19/1.79s;
+после остановки91.74° и.77° по LIO base. Все осиIdle, отказов нет.
+Runner допускает.12m/s (раньше.06); средний speed guard масштабируется
+1.5*speed/(pi*.09), не ниже20rpm; instantaneous60rpm неизменён.
+Обновлённый путь .6m/.12m/s прошёл vcan с завершением всех осейIdle
+перед физическим проездом. Профильmixed_drive выбран вconsole,
+auto_turn оставлен сравнительным; общего роста лимита тока не было.
+
+29.09: новая комната, текущая карта полигона к ней неприменима. План полного
+сценария и требования очного листа — docs/mission-plan.md. Nav2 установлена,
+но реальная автономная навигация и повторная локализация ещё не подтверждены.
+После новой загрузки Pi обнаружен скачок NTP03:06->03:33 после запуска LIO;
+координаты разошлись до миллионов метров и перестали обновляться. На
+неподвижном роботе перезапуск console/LIO после NTPSynchronized=yes
+восстановил свежую позу со стационарным разбросом порядка сантиметра.
+Связь с мини-ПК восстановлена, субагент готовит локальную модель и benchmark;
+скорость inference пока не измерена. Карта новой комнаты ещё не записана.
+
+29.09 room mapping interrupted by axis0 free-wheel fault (user reports
+wheel briefly unloaded at height change). Captured CAN diagnostic:
+.local/calibration/wheel-unloaded-fault.json. Controller errors0x81:
+OVERSPEED+SPINOUT_DETECTED; motor0x110000000; encoder0. Last0.5s shows
+GROWING speed oscillations while velocity command falls1.02->.66rev/s;
+measured speed reaches6.48rev/s with sign reversals. Not merely a tight
+threshold. Hall30/P.5/I.75 is not yet validated under wheel unloading.
+All motors stopped; explicit reviewed axis0 reset sent in Idle with STOP,
+then all12 motor/encoder/controller error fields read0. Existing automatic
+overspeed-reset helper correctly rejected new0x81; whitelist not broadened.
+No overspeed/spinout protection disabled or raised. USB rear board requested
+for integrator/filter diagnostics; fix and unload verification outstanding.
+Room bag field-20260929-033749/bag-001 closed,630MB. C270046d:0825 onPi;
+DECXIN onmini verified by agent. Supplied semantic-map.yaml equals ZIP copy:
+7objects/19viewpoints,5 low_clearance_ok,all unverified,robot.width.30 differs
+from Nav2footprint width.40. First room pipeline needs room-local targets;
+field coordinates must not be used at home.
+
+29.09 suspended-wheel A/B diagnosis, both ODrives USB on mini-PC:
+original P with I=0 still produced growing oscillation at only .03m/s
+command (20260929-040159, Hall30, peak estimate2.306rev/s/Iq9.73A).
+Front controller0x81 explicitly inspected/reset while Idle; automatic
+fault whitelist unchanged. Hall100 alone with same P/I0 also aborted
+(040453, peak1.333rev/s). Reducing P fivefold to rear.1/front.053,
+I0/Hall100 completed six +/- .03,.06,.12m/s steps (040611), peak
+estimate.75rev/s and Iq1A. This isolates excessive unloaded-loop gain;
+integrator windup is not necessary for the observed instability.
+Restoring I.75/.3975 at reduced P (040836) tripped custom instantaneous
+1rev/s guard at1.0625rev/s, Iq peak1.29A; no firmware error reported
+at abort. This last trace is not equivalent evidence of growing runaway:
+Hall quantization and asynchronous current samples need consideration.
+No claim of stable loaded/unloaded universal tuning yet. Hall100 is RAM
+ONLY on both boards; flash remains30. Experimental profiles are not
+accepted floor settings. Control stopped, axes Idle after runner; STOP
+latched again. Integrator limit remains infinity, spinout/overspeed
+protections unchanged. Latest user asks initial vs braking cause:
+initial low-current acceleration precedes growing alternating speed;
+available asynchronous CAN trace cannot pinpoint torque at fault instant.
+
+29.09 04:22 follow-up: load_robust_low_i (rear P.1/I.25,
+front P.053/I.1325) with Hall30 restored in RAM on all four axes
+completed six suspended +/- .03,.06,.12m/s stages without abort
+(20260929-042248). Peak sampled Iq1.219A; instantaneous Hall velocity
+peak.99937rev/s is close to1rev/s trial guard, so margin/noise still
+needs review; not proof of robust operation at all speeds/load changes.
+At .12m/s final-second wheel speed means .405–.457rev/s vs target.424.
+Profile and before/after diagnostic records saved locally/on Pi; no flash
+write. Hall30 already persisted from earlier commissioning. Control
+stopped, STOP latched. Await floor placement for same-profile straight
+and 90deg turn; do not promote candidate to normal console driving yet.
+
+29.09 04:25 floor checks authorized after user lowered robot:
+load_robust_low_i line-return .35m/.12m/s passed (042512). Relative LIO
+IMU displacement in base initial heading: forward .350m/cross -.007m,
+return .006m/cross -.003m, end yaw -.08deg; peak Iq .919A. No independent
+visual smoothness confirmation. Turn 042557 stopped at3.84s/~4.48deg
+by instantaneous guard1.159rev/s (averages below limit), no axis error.
+Motion onset ~2.7s: I.25 too slow to build turning effort on this floor.
+Comparative load_robust I.75 turn042638: ~5.25deg at1.87s,19.59deg at2.87s,
+then same guard1.153rev/s on rear-left, peak Iq5.28A, no axis error.
+Neither turn completed90deg. Do not describe runner guard as firmware
+fault or claim universal profile validated. All Idle, control stopped,
+STOP latched. Hall30 all axes, no flash changes. Console mixed_drive
+still old default and known unsuitable for unloaded wheels; candidate
+not promoted. Next: distinguish transient Hall peaks from sustained
+overspeed in trial guard, then finish bounded turn; do not disable
+firmware protections or infer stability from aborted trials.
+
+29.09 user requested rollback after floor compromise failed. Restored
+mixed_drive in RAM via both mini-PC USB links, readback verified all4:
+rear P.5/I.75, front P.265/I.3975, Hall30. Both boards all Idle;
+control inactive, STOP remains0 (latched). Runtime control.env restored
+mixed_drive/20A, matching console default. No flash write or motor arm.
+Before/target backups on mini commissioning/odrive-backups; runtime env
+backup on Pi records/diagnostics/rollback-20260929. Known unloaded-wheel
+instability remains unresolved; rollback is not a fix for that fault.
+
+29.09 04:46 fresh battery after user reported prior battery nearly depleted:
+previous attempt044053 refused arm at24.4V. New battery39.45/39.85V;
+all wheels explicitly suspended on box. mixed_drive unloaded repeat044649
+failed during zero-command activation settling BEFORE first speed step.
+Driver stopped all axes; runner reported stale odom as secondary failure.
+Raw CAN capture .local/calibration/new-battery-unloaded-fault.json shows
+node2 input_vel=0 throughout growing alternating estimated velocity:
+.3,-.48,.74,-1.13,1.82,-3.09rev/s, latest sample4.455rev/s. Encoder position
+oscillates too. Errors: node2 controller1 (OVERSPEED),motor0x110000000,
+encoder0; other axes error fields0. Not a small isolated Hall peak and
+not evidence that raising commanded cruising speed cures the instability.
+No current/overspeed/spinout thresholds raised. STOP latched and control
+stopped. Runner's monitor=False initial1s allowed fault to precede its
+own guard; improve startup monitoring separately, retain firmware guard.
+
+29.09 experimental model-based compensation (not yet accepted): zero-command
+node2 capture fits growth6.822/s at7.002Hz, RMS .071rev/s. Equivalent PLL30+
+PI+inertia/damping model gives J=.000258kg*m²,B=.00415Nm/(rev/s); this is
+not independent physical identification. tools/model_hall_loop.py includes
+linear uncertainty sweep and quantized nonlinear tests, outputs .local/drive-model.
+Candidate F(s)=(1.2s²+46.6s+550)/(s²+115s+550) applied to velocity feedback
+only, DC gain1; preserves mixed_drive P/I, FOC phase and all protections.
+Linear sweep stable; nonlinear low-friction residual cycles ~.03turn peak
+to peak remain. No claim that floor turns are preserved until physical test.
+Patch/reproduction instructions deploy/odrive/, upstream a308314 fw-v0.5.6.
+Host C++ DC/frequency/reset tests pass. Startup raw-speed/error guard added
+to check_drive; normal and startup-overspeed vcan checks pass. Raw CAN now
+saved as samples.can.json (bounded60000 frames).
+Mini toolchain installed, image319360B SHA256
+be78fdddb236d9eb672edeaee6b3d6b04b2959e09f07bcdd540421751800320c.
+Front flashed/readback identical, booted Idle, configs match backup apart
+from pre-existing flash P/I restored to mixed_drive in RAM. Original full
+flash and full configs retained on mini robot/firmware/images and
+robot/commissioning/odrive-backups/pre-compensation. Rear update ongoing;
+no physical compensated trial yet. STOP latched, control service stopped.
+
+29.09 05:34 compensation physical update: BOTH boards now have verified
+candidate image above. Original full rear SHA256
+6e4bd43a3839c67d39e8d0a5f662fcc6c5e6b34ddb65c51e65e92a066c5f4ba0;
+front78e1c3233bac4d8f363a8081314094b700e2f05ae2b52bd2c07acf7219831ec4.
+Both backups also copied to Mac .local/odrive-backups, full configs retained.
+Rear boot exposed old stored P.2/I1,vel50,current38; restored current working
+mixed_drive P.5/I.75,vel3,current20 before trial; other config matched backup.
+053322 mixed_drive at1A completed six suspended steps; 053412 at20A also
+completed all +/- .03/.06/.12m/s, stops/reversals, no firmware/runner fault.
+Full CAN velocity peaks per node .831/.829/.877/.769rev/s; sampled Iq maxima
+1.330/1.221/1.371/1.260A. At .12m/s last .75s mean magnitudes .418-.433rev/s
+vs target .424. Final .8s all estimated speeds0 and positions unchanged.
+P/I unchanged, no protection thresholds raised. STOP latched, service stopped,
+all Idle. Configuration save requested on both boards after passing tests;
+readback after reboot follows. Await user lowering robot for floor tests;
+90deg turns with compensation and contact-to-unloaded transition NOT tested.
+
+29.09 05:46 floor acceptance of experimental Hall compensation: both boards'
+saved configuration was read back after reboot: Hall30, current20A, vel3rev/s,
+front P.265/I.3975 and rear P.5/I.75; startup closed loop disabled.
+After battery restart LIO was absent; restarted console/LIO while stationary.
+New LIO origin is local to this room; do not reuse old map goals unchanged.
+Trial053821 stopped at20deg on runner averaged speed .60334rev/s vs .600;
+no ODrive fault. For p_probe ONLY, runner bounds now average .8rev/s and
+instant1.5rev/s; firmware protections unchanged. vcan turn/return passed.
+Trial053953 completed floor90deg and return: LIO settled +89.78deg then
+-1.37deg relative initial; stages6.60/7.44s, sampled Iq peak6.49A.
+Trial054533 line-return .35m at .12m/s completed without fault. LIO sensor
+displacement at forward endpoint .340m, heading change .23deg; final
+displacement .0069m, heading .29deg. These are LIO estimates, not external
+ground truth. Wheel odom final x approximately0, maximum heading .92deg.
+No extra P/I reduction needed for these floor tests. Compensation passed
+suspended and floor separately; actual wheel unloading/re-contact over an
+obstacle remains untested, and low-speed tactile/visual smoothness awaits
+user observation. End: runner deactivated axes, control service inactive,
+STOP explicitly latched and verified flag0. No autonomous restart requested.
+
+29.09 LIO smoothness analysis of054533 (no extra motion): deduplicated226
+poses at~11.97Hz, projected XY on initial forward direction (IMU yaw-pi/2).
+7-point quadratic local slope (~0.50s span) shows continuous main forward/
+reverse motion, peaks .115/.118m/s. Heading range during each commanded leg
+.46/.48deg. Near slow stop forward estimated speed has .007-.066m/s pulses;
+stationary final1.4s position std2.8mm and derived speed std.009m/s, so small
+pulses cannot all be attributed to mechanics. Short .35m trial commands full
+.12m/s for only1.22s before braking: no long constant-speed acceptance.
+12Hz pose stream and smoothing cannot exclude prior~7Hz vibration (aliasing).
+Plot and reproducible analysis kept .local/drive-model/smoothness/. Conclusion:
+main trajectory smooth at this scale, fine low-speed vibration unproven.
+
+29.09 05:50 user explicitly suspended robot again. Trial054956 mixed_drive,
+20A, unchanged compensated firmware, completed +/- .03/.06/.12m/s equivalent
+wheel commands,3s each and zero intervals. No fault; all final axes Idle,
+control inactive, STOP latched(flag0). Peak raw CAN velocity .891rev/s,
+sampled Iq peak1.369A. Final zero interval position unchanged/speed zero.
+At+.12 final1s means magnitude .412-.427rev/s (target .424); at-.12
+.410-.431. Residual Hall-estimated velocity std .078-.201rev/s across
+steps; not perfectly smooth unloaded rotation. Encoder position after linear
+trend removal spans~9-22deg over last1.5s, with some reverse increments <=6deg;
+position is also Hall/PLL-derived, so this is not independent confirmation
+of physical angular vibration. CAN encoder frames average~100Hz but receive
+timestamps are batched by polling; do not interpret median inter-receive dt
+as sensor rate or fit a vibration spectrum to those timestamps blindly.
+No escalating zero-command oscillation reproduced. Ground contact transition
+still not exercised by this separately suspended test.
+
+29.09 suspended 10km/h request: added tools/run_suspended_speed.py, exclusive
+CAN0.5.6 owner with explicit USB baseline, ramp .5rev/s² to9.824rev/s (90mm),
+5A temporary current and11.5rev/s velocity limit, timed stages and STOP/radio/
+feedback/voltage guards. Normal drive stack/config unchanged. Initial vcan
+full sweep and STOP rollback passed. First physical attempt lacked runtime
+lock directory and did not write; next failed CAN ENOBUFS during setup BEFORE
+arming. USB verified all Idle, restored3rev/s20A on all4. Added bounded retry,
+1.5ms TX pacing and best-effort per-axis cleanup with error log. Updated vcan
+verification running; user paused physical work to replace battery. STOP
+latched. NO physical high-speed result yet; do not claim10km/h achieved.
+Updated paced vcan full sweep completed with all4 Idle; STOP test also passed
+with3rev/s20A restored. Await battery replacement confirmation before real run.
+
+29.09 suspended 10km/h physical test PASSED after fresh battery and user
+released radio STOP. First zero-command attempt refused because voltage
+listener counted an extra unsolicited node1 response; all axes returned Idle
+and rollback completed. Restricted board voltage monitoring to nodes0/2.
+Final test runtime54.7s: ramp .5rev/s² through1,3,5,7,9.8244rev/s,2s holds,
+then ramp to zero. At highest hold all4 mean wheel-equivalent speeds
+10.002–10.003km/h, individual samples9.958–10.075km/h. Sampled peak Iq per
+node0..3:1.258/1.762/1.217/1.050A, temporary limit5A. Vbus39.49–40.40V.
+No fault; all final statesIdle; RAM rollback3rev/s20A sent without errors,
+STOP latched. Original P/I, Hall compensation and flash settings unchanged.
+Result .local/drive-model/suspended-speed-10kmh.json. This proves unloaded
+wheel speed tracking at10km/h, NOT safe/usable chassis speed on the floor.
+Post-test USB readback confirmed all4 Idle, velocity limit3rev/s/current20A,
+controller/motor/encoder errors0. Axis2048 is expected watchdog expiration
+AFTER test process stopped feeding, not a fault during the speed sweep.
+
+29.09 06:11 user reported loaded-turn accumulation and confirmed floor/free
+90deg space. After battery change LIO was stale; restarted console/LIO while
+stationary. Trial061108 mixed_drive20A,90deg/return passed, but success of
+endpoint is NOT smoothness: LIO2deg onset1.51s/2.00s, CAN wheel command90%
+reached .70s/.70s; max command .30955rev/s. Before forward onset Iq rises
+~.2 to5A while yaw nearly fixed. Reverse starts with residual signed Iq from
+previous turn (node0 +4.33A), then crosses sign around1.2s before yaw onset.
+Consistent with static-friction breakaway and PI integral unloading; actual
+integrator state not recorded, so not independently proven. Peak measured
+Iq5.86A, far below20A cap. Central LIO angular-rate p10/median/p90:
+15.4/20.5/25.0deg/s forward;11.6/18.5/23.8reverse. Clearly nonuniform loaded
+turns remain despite stable airborne test. No gain/limit changes made.
+STOP latched, runner all Idle. Analysis/plot alongside trial ignored files.
+
+29.09 06:34 empty FM/Rx battery diagnosed: after reboot mrbobus-stop failed
+five times binding192.168.67.149 before DHCP assigned it (EADDRNOTAVAIL), then
+systemd start-limit blocked UART/telemetry too. Backed up deployed code/unit
+in Pi commissioning/telemetry-boot-backup. Added Linux IP_FREEBIND to specific
+HTTP address (Origin policy unchanged), removed network-online dependency
+from stop service so RC/telemetry need no Wi-Fi. Ten stop/telemetry unit tests
+pass; Pi integration on unassigned192.0.2.77:18081 stayed alive with flag0,
+no UART/CAN activated. Deployed/restarted stop only; live LQ94, vbat39.08V,
+FM DISARMED, telemetry counter23 and fresh radio state. Control inactive,
+flag0 retained. Actual transmitter screen reception awaits user observation.
+29.09 06:36 follow-up: stop-service boot failure also left console/control
+inactive via failed dependency. Started console explicitly; stop telemetry
+recovery alone had not restored the RC command consumer. User in MANUAL,
+neutral/zero throttle; no assistant motion command. Console HTTP recovered;
+new neutral-to-gear transition required for manual activation.
+
+29.09 recovery without operator SSH: stop/console/control units now retry
+failures without start-limit lockout; control restarts on failure, always
+with inactive drive controller. Console/control WANT rather than REQUIRE
+stop service; a STOP process failure no longer permanently stops dependent
+units. Existing fresh-radio/STOP gates still block arming/commands. All units
+enabled at boot. Backups Pi commissioning/service-recovery-backup. Unit syntax
+validated systemd-analyze. Live disarmed checks: SIGKILL stop auto-recovered,
+console stayed active and flag0; complete stop of chain then start console
+pulled all3 active, GUI disarmed and4 axesIdle; controller killed/restarted
+NRestarts1, GUI disarmed and4Idle. No motion commands or motor activation.
+This was a cold service-chain test, not an actual Pi reboot/network outage.
+DDS still uses configured robot IP; if absent, dependent processes retry until
+available. Independent radio/telemetry/STOP no longer needs that IP.
+
+29.09 autonomous preliminary room mapping authorized by user (requested self
+survey instead of manual RC). LIO fresh; camera points mostly upward, so ground
+clearance assessed using LiDAR. Recorded field-20260929-064025 bag-001/002.
+Two bounded .5m/.10m/s forward trials064549/064921 with external fresh-cloud/
+LIO and forward obstacle guard; two90deg-return LIO probes064651/064955.
+All completed; total net displacement .979m from start, orientation returned
+approximately initial. Robot NOT returned to initial position. End STOP on,
+axes deactivated, recordings stopped. No autonomous Nav2 mission involved.
+3170clouds + IMU/TF/LIO/wheel/commands/camera saved; all clouds matched a LIO
+pose, no skipped clouds, p99 gap~5ms. Combined5cm voxel cloud185647points.
+Offline global floor alignment~6.13deg is visualization fit, not verified
+sensor calibration. Nearest-pose registration, no per-point deskew or loop
+closure; coverage incomplete behind occluders, unknown space NOT free.
+Pi maps/room-20260929-064025 and -segment2 preserve raw exports/bags; combined
+preview in maps/room-20260929-064025/preview. Mac .local/room-survey/result:
+room-map.ply,npz,png,index.html (self-contained WebGL),summary.json.
+Temporary read-only HTTP preview192.168.67.149:8082 via mrbobus-room-preview
+expires after2h; files persist. Browser display checked,108376visible points
+with ceiling hidden,186k total. Existing competition map left unchanged.
+
+29.09 user confirmed overall envelope307x347mm including wheels. Both Nav2
+costmaps now use centred rectangle x+/-0.15351,y+/-0.1735m; retained padding
+.02m per side (effective347.02x387mm), inflation .30 unchanged. Previous
+conservative rectangle380x400mm replaced with confirmed envelope. Deployed
+navigation.yaml source and robot.urdf source/install on Pi, hashes match Mac.
+Visual chassis now307.02x270.04x213.03mm; wheel/joint/L2 TF unchanged (XML
+joint comparison passed). Configs backed up Pi commissioning/geometry-20260929.
+No controller/Nav2 launch or motor activation; model applies at next launch.
+YAML parsed, both costmaps identical. Physical collision/navigation trial
+not performed; URDF still simplified visuals without collision certification.
+
+29.09 user requested straight run via normal navigation stack with screwdrivers
+placed on floor. No motion started. Current Navigation.scan fixed z>.06m
+(base_link) discards all686 display points in forward .3–1.5m,|y|<.35m;
+all z[-.166,-.043]. Offline floor-relative diagnostic on four1.7s-separated
+clouds found only1/8/6/13 points >20mm above fitted floor,0/1/0/2 >30mm,
+no5cm XY cell seen in all4 (two seen3/4). Accumulated GUI cloud not a proven
+low-obstacle detector. Existing Nav2 still selects competition map, room
+preview is NOT loaded/registered for navigation. Asked user whether desired
+test is avoidance or intentional wheel traversal before choosing next action.
+STOP remains latched; no changes to detection/config or motors.
+
+29.09 07:45 room Nav2 box-avoidance commissioning completed with user-authorized
+floor motion. Replaced fixed base z>6cm scan filter with bounded per-scan local
+floor fit (3.5cm height threshold), sparse low-return rejection (>=3 neighbours
+within8cm), and narrow mounting-specific side-echo mask. Side returns were
+present56/58 sampled scans over .5m translation/96deg yaw in room bag002; user
+confirmed clear sides. Mask is empirical, needs revalidation if mounting changes;
+thin screwdriver detection is NOT established. Floor-fit failure/staleness blocks
+navigation commands. Separate floor-clear scan clears only observed rays, capped
+by detected obstacles; no blanket infinite-ray clearing. Global costmap now also
+has live obstacle layer. Current room occupancy built from saved floor/obstacle
+cloud; old occupied marks make detours longer. Competition map unchanged.
+
+Console and navigation both select MRBOBUS_MAP_DIR via systemd map.conf drop-ins:
+/home/taras/robot/records/maps/room-20260929. Console map matching verified ICP,
+latest overlap85%, RMS3.2cm; navigation.launch.py overrides map-server YAML from
+same directory. Alignment is not persisted across console/LIO restart: re-localize
+while stopped. Changed RPP angular acceleration3rad/s2 (controller wheel ramp .8
+still applied), max rotation .3rad/s and translation .1m/s unchanged. Earlier
+RPP acceleration .15 commanded only .01rad/s against stationary wheel odometry,
+preventing breakaway. Nav2 loop10Hz (still occasionally misses deadlines on Pi);
+failure_tolerance1s stops/retries transient controller failures, never disables
+collision checking. PoseProgressChecker counts turns (.15rad), replacing
+translation-only progress check which aborted the final turn after20s.
+
+Actual Nav2 NavigateToPose route went around marked obstacles to goal
+map(.09845,-.53252,yaw-1.58585). Initial commissioning attempts stopped on collision
+predictions/self/noise marks; full route then ran100s until explicit trial timeout,
+continued to final orientation (translation-only progress bug fixed), final action
+reported SUCCEEDED. Post-stop LIO error9cm and~12deg relative goal (configured
+12cm/.2rad tolerance; small post-stop drift). Not an uninterrupted single-attempt
+success. Final STOP latched,4axesIdle;2048 watchdog flags after Idle expected.
+Raw live snapshots, diagnostic costmaps, trial histories and nav-result.png in
+.local/regulation-review (ignored). Backups commissioning/nav-box-backup on Pi,
+.local/nav-box-backup on Mac. Removed duplicate trial goals, retained final goal.
+
+29.09 competition mission panel deployed at :8080/mission: prompt, local model
+plan, bounded Nav2 viewpoint search, two-frame OpenCV QR decode, return to captured
+start, logs/QR image under records/missions (not Git). Gemma4 26B-A4B Q4_0
+served on mini :8088; actual park prompt correctly selected park in10.4s.
+Image-model request disconnected; optional mission VLM disabled pending repair.
+No cloud inference used. Mission nearest-cell certification remains unimplemented,
+explicit completed_unverified outcome; user requested prioritizing functional E2E.
+QR size confirmed8cm, forest debris is at park between bridges. Added six tests
+for selection/cancel/ownership/fault and gate owner compatibility.
+
+Navigation prior now generated by tools/build_navigation_map.py from semantic
+fixed geometry; deploy MRBOBUS_NAV_MAP selects navigation.yaml separately from
+LiDAR reference field.npz. Old cars/rubble are not static obstacles; live global
+and local obstacle/floor clearing layers remain enabled. Enclosure and polygons
+are approximate; central park/water island conservatively blocked, bridge decks
+open with thin rail boundaries. Physical navigation on new prior not yet tested.
+
+Panel supports manual pose/heading via existing3D map, explicit operator
+confirmation without ICP, saved start approx(1.70,-1.55,+pi/2), localization reset,
+STOP and reset of known ODrive overspeed cascade while Idle/exclusive CAN.
+Current position user-confirmed west lane beside rubble, facing south; NOT start.
+LIO diverged after restart (kilometre coordinates). Added latched finite/jump
+validation invalidating map alignment and commands; driver+LIO restart restored
+stationary centimetre-scale variation. Cause not yet proven; freshness alone
+must not be treated as valid localization. No motion in this mission session yet.
+
+First competition mission20260929-104749-7ac1ca: local interpretation4.7s,
+Nav2 action drove/turned for~38s toward park_view_1, then collision prediction
+aborted; second viewpoint and return also failed. NOT an E2E success; no QR read.
+Operator STOP issued; subsequent camera/map orientation mismatch remains under
+investigation. Manual prior(-1.65,-.65,-pi/2) was based on user location/direction;
+ICP rejected it at35% overlap. Do not reuse this pose as verified automatically.
+Current alignment cleared by service restart. On user request autonomous limits
+now0.20m/s,0.50rad/s in both RPP and arbiter; six navigation gate tests pass on Pi.
+No motion test at new limits yet. All changes retained, robot stopped.
+
+29.09 ~11:02 user powered robot off for competition quarantine. No further
+motion/deployment authorized during quarantine. Final STOP HTTP requests timed
+out because robot was already disconnected; do not claim remote STOP confirmed.
+Last observed motion ended in mission failure with motors stopped. Latest restart
+had no new mission started before user power-off.
+
+Current field localization was corrected against two enclosure walls and tower:
+pose near(-.75,1.8,.5), ICP69%/3.8cm, user confirmed overlay physically correct.
+Earlier manual west-lane(-1.65,-.65) was the wrong end of the house. Start picture
+maps to southwest(-1.65,-1.55,yaw0), corrected semantic saved start accordingly.
+Mission105227 reached vicinity(0,1.05) then failed (collision and intermittent
+floor/scan freshness). No QR decoded and no completed return. Next rotation at
+current cell reached yaw~1.3, then LIO lost validity; later jump guard latched.
+Source of recurring LIO divergence still unresolved; do not certify navigation.
+
+Floor fit now uses LIO-compensated0.5s history, spatial dedup2.5cm, minimum20%
+inliers plus100points/spread/tilt checks. Obstacle classification and clearing
+remain current-scan only; tree remains a real obstacle. Brief stale observations
+zero velocity, sustained>0.9s cancel. Seven ground and seven navigation tests pass;
+full physical mission not validated. QR decoder now single-threaded to reduce
+Pi load; synthetic QR decoded successfully. Actual wide1280x1024 frame shows QR
+near bridge; horizontal mirror apparent from text, not corrected in live stream.
+Wide QR decode attempts on full/cropped/flipped/upscaled JPEG unsuccessful.
+
+Latest deploy (untested after restart): mission LIO timeout0.9s, OpenCV1thread,
+park active_viewpoint_ids=['park_operator_view'] at(.01,1.1,yaw.4), reflecting
+operator instruction to inspect QR from current cell without detour. This is a
+TEMPORARY test-specific override, remove it before general competition missions.
+Original park viewpoints remain in catalog. User hints explicitly logged as
+operator input, not claimed as model discovery. Mission panel retains previous
+result across restart; :8080/mission. No complete E2E success claimed.
+
+29.09 11:17 user resumed official attempt, robot at fixed start. Removed park
+active_viewpoint_ids/temporary current-cell point. Local model health OK. Restarted
+L2+console, initial LIO valid; saved southwest start refined to(-1.664,-1.491,-.015),
+ICP73% RMS6.6cm. Tower visible left of forward road, consistent with start heading.
+Panel opened, awaiting USER prompt/Start; no automatic mission submitted. User
+new QR hint outside tower is recorded as operator hint with east view priority,
+not a model-detected target. New obstruction remains dynamic LiDAR responsibility.
+
+29.09 user ended attempt ~11:28; console STOP acknowledged, Nav2 stopped.
+Official model sessions112204/112302/112553 retained byte-for-byte under
+.local/official-attempt-20260929 with SHA256 manifest. First model answer unknown;
+corrected interpretation distinguishes fixed building anchor from movable fallen
+tree, subsequent answers round_tower. First route reached west tower viewpoint,
+QR-decoder lazy import interrupted LIO callbacks. Moved cv2 import to startup,
+1thread retained. Added resume endpoint preserving original start. Assisted Nav2
+via corridor(-.08,.15),(.9,.15),(1.65,.1) reached ~1.42,.18 then floor support/spread
+failure prevented continuation. No QR decoded, no successful finish/return.
+Ground spread min lowered .18->.10 after actual cloud validated548 floor returns;
+latest change did not receive successful motion verification before attempt ended.
+LIO failed freshness after last restart; no final resume launched.
+
+User requested demo privacy: removed operator_hint from working semantic config
+and future operator event emission; UI explicitly labels model/navigation events
+as an excerpt and excludes operator metadata. ORIGINAL logs remain unaltered.
+Downloads contains separately scoped model-event TXT/JSONL exports with exact
+UTC+03 timestamps; not represented as full autonomous-run evidence. Deployed
+source/UI/config; no service restart or motion after user ended attempt.
+Remaining active_viewpoint_ids for round_tower is attempt-specific; inspect before
+next general mission. Both navigation and LIO require further reliability work.
+
+29.09 next-attempt preparation: backed up console and original field.npz on Pi
+under commissioning/pre-next-attempt. Added optional reference_filter.json crop:
+field bounds x[-2.056,2.122], y[-1.947,2.193], drop z>0.60 only within
+0.18m boundary strip; 60579->44090 reference points. Original NPZ unchanged,
+live obstacle stream unchanged. This is geometric filtering, not person detection.
+Nav2 and command gate increased 0.20->0.30m/s, 0.50->0.75rad/s; seven gate
+tests pass on Pi (Mac has no ROS). No motion at new settings yet. Removed tower
+active-view-only override. LIO fault cleared by restart, current map pose requires
+reapplication. Axes showed watchdog2048; underlying motor/encoder/controller
+errors were zero. Reset diagnostic failed because /run/robot-base disappeared on
+service stop; recreated directory, added maintenance fix locally pending deployment.
+Correction to prior incident note: QR cv2 lazy import is a suspected contributor
+to callback starvation, not a proven cause of the localization failure.
+
+29.09 ~12:45–12:52 live Nav2 validation at 0.30m/s/0.75rad/s:
+operator reapplied pose facing damaged yellow house; ICP61.8%, RMS8.5cm,
+shift9.8cm. Reached(-.4,-1.38),(.25,-1.52). South/east tower approach
+blocked by other robot, collision prediction stopped motion. Assisted alternate
+route via(-.02,-.745),(.1,.15),(.9,.15),(1.68,.12) succeeded without LIO
+freshness faults. Next tower viewpoint(1.71,-.45) blocked again; camera shows
+two robots in exterior lane. Asked user to clear lane; STOP issued. No QR read.
+This was Nav2 with agent-selected intermediate goals, not autonomous mission
+recovery. Controller loop frequently4–8Hz vs10 target; LIO height drifted
+~0.15m over route, requires assessment despite fresh data. No claim of full E2E.
+
+After user cleared lane, tower east viewpoint reached; scan at catalog yaw saw
+facade. Small Nav2 dоворот target -2.05rad (actual -2.265) brought real QR fully
+into C270640x480 image. OpenCV failed on full/cropped/upscaled frames; installed
+python3-pyzbar, ZBar decoded identical payload on3successive live frames. Added
+ZBar-first decoding with OpenCV fallback to mission, imports at startup; six
+mission tests pass; updated scan_qr also decodes saved real frame in isolated
+non-driving test. Evidence records/diagnostics/qr-validation-20260929 on Pi.
+Payload: medium severity, conscious, difficult breathing, pulse104, urgent care.
+Direct return aborted collision; agent-selected intermediate Nav2 goals returned
+to(-.809,-.870,yaw1.75) vs initial(-.878,-.769,1.546), ~12cm planar difference.
+STOP acknowledged; removed temporary test goals, restarted console to apply
+ZBar and maintenance-directory fix. Full autonomous recovery/search not proven.
+
+Next E2E run20260929-131621-eb73b4: same user prompt, local model selected tower
+in10.9s. No agent motion interventions during run. All4viewpoints aborted by
+Nav2 collision, then automatic return succeeded; state not_found, QR unread.
+This is an unsuccessful search with successful return, not full task success.
+Pi HD MJPEG camera verified1280x960@5fps, stream-copy avoids reencoding. ZBar
+background search now runs while searching/driving, stops navigation on confirmed
+QR, inspection offsets +/-0.70rad. Six mission tests passed. 15s sample maxima:
+LIO age.209s, cloud.147s, camera.338s; CPU panel~onecore, availableRAM3.1GB,
+54C. Nav2 misses10Hz frequently; do not claim large real-time headroom.
+User observed wheel contact with toy car in prior assisted turn. Padding raised
+2->4cm; collision remains enabled. RPP explicit cost_scaling_dist.28,gain1,
+curvature radius.40,min regulated speed.10,approach distance.25; previous defaults
+were overly broad for this field. No proof that all contact risk is eliminated.
+User requested tower80x80cm lawn traversable but discouraged. Generator now paints
+lawn grayscale140 before lethal building, map mode scale; global trinary_costmap
+false retains intermediate costs. Roads remain254, building0. Outside enclosure
+is lethal instead of unknown (both previously forbidden).425soft cells verified.
+Pi backup commissioning/pre-lawn-cost. Low live returns are not automatically
+ignored by this static change; lawn edge vs real obstacle classification remains
+unverified. No new motion after this map update.
+
+29.09 ~13:56 diagnostic approach: road graph routing, rectangular global footprint
+(+4cm padding), shorter .20m lookahead and known bridge low-deck mask deployed;
+6 mission +2 routing tests pass. No completed E2E established. First restart
+attempt failed commissioning supply check at30.9–31.2V; user replaced battery,
+39.7V measured. LIO reset needed twice: first reset returned without a surviving
+mapping process (suspected old-child shutdown/start race, not yet fixed).
+After restoring prior pose+ICP(62.7%, RMS12.3cm, shift23.4cm), explicit Nav2
+far-side goal aborted. Synchronized camera13:56:17 shows yellow-house wall close
+in front while map heading points into nominal free lane: map alignment is not
+trustworthy despite ICP gate. STOP sent; requested operator reapply physical pose.
+Read-only tools/capture_nav_obstacles.py saves camera, status, real local/global
+costmaps, scan, TF and path at1Hz; render_nav_obstacles.py plots evidence.
+Pi evidence records/diagnostics/e2e-final-20260929; local .local/nav-evidence.
+This failure cannot justify reducing collision clearances or claiming lane blocked.
+
+01.10.2026 publication: official organizer post https://t.me/cuprtc/2383 confirms
+Misis Akies (Baranov Andrey, Epifantsev Taras, Sargin Yaroslav), first place,
+340 points. README updated to competition prototype, architecture, real deployment
+requirements and known E2E limits; publication/academic-credit draft included.
+Last competition continuation20260929-142726-dc54cd decoded critical-state QR on
+two frames, held zero3s, failed return at first connector after Nav2 collision
+prediction and controller patience exceeded. Not a successful full autonomous run.
+Added offline-only Python test entrypoint and CI; no robot service or motor command
+was run for publication. Existing ROS-dependent tests remain separate. Working
+files and301historical Git blobs scanned for credential patterns; no matches.

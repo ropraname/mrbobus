@@ -1,8 +1,10 @@
 """Latched stop state tests; no ROS, network, CAN or motors."""
 import tempfile
 import unittest
+import time
 from pathlib import Path
 from stop_panel import StopState
+from radio_policy import RadioPolicy
 
 class StopTests(unittest.TestCase):
     def setUp(self):
@@ -23,5 +25,15 @@ class StopTests(unittest.TestCase):
         restarted = StopState(self.path)
         self.assertFalse(restarted.status()['ready'])
         self.assertEqual(self.path.read_text(), '0')
+    def test_radio_stop_cannot_be_overridden_by_web(self):
+        self.state.radio=RadioPolicy();self.state.radio.held=True
+        with self.assertRaises(ValueError):self.state.ready()
+        self.assertEqual(self.path.read_text(),'0')
+    def test_disconnect_never_clears_stop(self):
+        self.state.radio=RadioPolicy();self.state.radio.mode='manual'
+        self.state.radio.connected=True
+        self.state.radio.tick(time.monotonic())
+        self.assertEqual(self.state.radio.mode,'auto')
+        self.assertEqual(self.path.read_text(),'0')
 
 if __name__ == '__main__': unittest.main()

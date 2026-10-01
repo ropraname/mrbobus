@@ -1,0 +1,969 @@
+map_id: field-20260928
+frame_id: map
+units: meters
+yaw_units: radians
+robot:
+  length: 0.30702
+  width: 0.347
+  clearance_margin: 0.02
+  camera_hfov_deg: 60
+  scan_deg_recommended: 30
+  verified: false
+start:
+  x: -1.65
+  y: -1.55
+  yaw: 0.0
+  confirmed: true
+  trajectory_start_hint:
+    x: -1.579
+    y: 1.858
+    yaw: -1.652
+    note: Начало записанной траектории (среднее по позам 0–80, разброс 6 мм), северо-западная
+      ячейка. Совпадает ли со стартовой клеткой соревнования — решает команда.
+objects:
+- id: round_tower
+  name: Круглое голубое здание «Стакан»
+  category: building
+  description: Высокий цилиндрический дом голубо-серой облицовки с рядами окон, верх
+    разрушен (чёрный провал). Стоит на квадратном зелёном газоне с кустами; у основания
+    тёмно-зелёный контейнер и игрушечный танк. Единственное круглое здание, в юго-восточной
+    четверти поля (x > 0, y < 0). По регламенту «Стакан» Ø660×800 мм с имитацией дыма
+    и огня.
+  keywords:
+  - стакан
+  - круглое здание
+  - круглый дом
+  - башня
+  - цилиндр
+  - голубой дом
+  - синий дом
+  - высотка
+  - разрушенный верх
+  - горящий дом
+  - дым
+  - пожар
+  shape: cylinder
+  center:
+  - 0.843
+  - -0.745
+  radius: 0.35
+  footprint:
+  - - 1.193
+    - -0.745
+  - - 1.166
+    - -0.611
+  - - 1.09
+    - -0.498
+  - - 0.977
+    - -0.422
+  - - 0.843
+    - -0.395
+  - - 0.709
+    - -0.422
+  - - 0.596
+    - -0.498
+  - - 0.52
+    - -0.611
+  - - 0.493
+    - -0.745
+  - - 0.52
+    - -0.879
+  - - 0.596
+    - -0.992
+  - - 0.709
+    - -1.068
+  - - 0.843
+    - -1.095
+  - - 0.977
+    - -1.068
+  - - 1.09
+    - -0.992
+  - - 1.166
+    - -0.879
+  uncertain: false
+  movable: false
+  surroundings:
+  - id: round_tower_lawn
+    type: lawn
+    description: 'Зелёный газон с кустами вокруг Стакана (одна ячейка поля): контейнер,
+      танк, кусты'
+    footprint:
+    - - 0.443
+      - -1.145
+    - - 1.243
+      - -1.145
+    - - 1.243
+      - -0.345
+    - - 0.443
+      - -0.345
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/round_tower_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:01:42
+    view: 'Издалека с юго-запада: здание целиком с разрушенным верхом'
+  - image: references/round_tower_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:04:07
+    view: 'Вблизи с юго-востока: газон с кустами, контейнер у основания'
+  - image: references/round_tower_03.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:05:52
+    view: 'С северо-запада: танк на газоне, зебра перед зданием'
+  viewpoints:
+  - id: round_tower_view_1
+    x: -0.02
+    y: -0.745
+    yaw: 0.0
+    side: W
+    observes: Западный фасад и западная половина газона; полоса дороги между Стаканом
+      и панельным домом
+    clearance_m: 0.339
+    distance_to_center_m: 0.863
+    distance_to_trajectory_m: 0.049
+    verified_on_robot: false
+    priority: 1
+  - id: round_tower_view_2
+    x: 1.71
+    y: -0.45
+    yaw: -2.814
+    side: NE
+    observes: Восточный и северо-восточный фасад, восточная часть газона; сбоку край
+      затора
+    clearance_m: 0.315
+    distance_to_center_m: 0.916
+    distance_to_trajectory_m: 0.038
+    verified_on_robot: false
+    priority: 1
+  - id: round_tower_view_3
+    x: 0.25
+    y: -1.52
+    yaw: 0.918
+    side: SW
+    observes: Юго-западный угол газона и южный фасад; южная дорога
+    clearance_m: 0.31
+    distance_to_center_m: 0.976
+    distance_to_trajectory_m: 0.019
+    verified_on_robot: false
+    priority: 1
+  - id: round_tower_view_4
+    x: 1.464
+    y: -1.465
+    yaw: 2.283
+    side: SE
+    observes: Юго-восточный угол газона (контейнер у основания) и южный фасад
+    clearance_m: 0.305
+    distance_to_center_m: 0.951
+    distance_to_trajectory_m: 0.052
+    verified_on_robot: false
+    priority: 1
+  notes:
+  - Центр стабилен по срезам высоты 0.1–1.4 м в пределах ±0.015 м, радиус 0.30–0.36
+    м; стенка в облаке размыта ±0.12 м.
+  - Точки 1 и 2 те же, что в шаге 1 (подтверждены командой). 3 и 4 добавлены для южной
+    половины газона.
+  - Южнее здания (x 0.5–1.3, y≈-1.55) зазор по field.pgm 0.27–0.29 м, поэтому точки
+    поставлены в углы, где зазор ≥ 0.30.
+  - 'С севера газон граничит с затором машинок, точку там не ставил: северный край
+    виден с точек 1 и 2.'
+- id: panel_house
+  name: Жёлтый панельный дом (разрушенный)
+  category: building
+  description: 'Длинный пятиэтажный панельный дом жёлто-охристого цвета с трещинами
+    на фасадах, в западной половине поля. Южный торец разрушен: обрушение верхних
+    этажей, обломки у основания. Вдоль фасадов газон с кустами. По регламенту 1400×500×720
+    мм, две ячейки.'
+  keywords:
+  - панельный дом
+  - панелька
+  - жёлтый дом
+  - пятиэтажка
+  - длинный дом
+  - разрушенный дом
+  - дом с трещинами
+  - обрушенный торец
+  - прямоугольное здание
+  - многоэтажка
+  shape: box
+  center:
+  - -0.76
+  - 0.545
+  footprint:
+  - - -1.01
+    - -0.15
+  - - -0.51
+    - -0.15
+  - - -0.51
+    - 1.24
+  - - -1.01
+    - 1.24
+  uncertain: false
+  movable: false
+  surroundings:
+  - id: panel_house_grounds
+    type: lawn
+    description: Газон и отмостка вокруг дома (две ячейки), включая площадку у разрушенного
+      южного торца
+    footprint:
+    - - -1.16
+      - -0.255
+    - - -0.36
+      - -0.255
+    - - -0.36
+      - 1.345
+    - - -1.16
+      - 1.345
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/panel_house_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:00:20
+    view: 'С северо-запада (у начала траектории): западный фасад, газон вдоль него'
+  - image: references/panel_house_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:04:42
+    view: 'С юга: разрушенный южный торец, обломки, зебра перед домом'
+  - image: references/panel_house_03.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:06:14
+    view: 'С востока: восточный фасад с трещинами, зебра'
+  viewpoints:
+  - id: panel_house_view_1
+    x: -1.546
+    y: 0.255
+    yaw: 0.0
+    side: W
+    observes: Западный фасад и газон вдоль него (средняя и южная часть)
+    clearance_m: 0.312
+    distance_to_center_m: 0.838
+    distance_to_trajectory_m: 0.113
+    verified_on_robot: false
+  - id: panel_house_view_2
+    x: 0.094
+    y: 0.265
+    yaw: 2.563
+    side: E
+    observes: Северная и средняя часть восточного фасада и газон вдоль него
+    clearance_m: 0.316
+    distance_to_center_m: 0.899
+    distance_to_trajectory_m: 0.03
+    verified_on_robot: false
+  - id: panel_house_view_3
+    x: -0.056
+    y: -0.615
+    yaw: 2.471
+    side: SE
+    observes: Разрушенный южный торец, обломки у основания, южная часть восточного
+      газона, южная зебра
+    clearance_m: 0.382
+    distance_to_center_m: 1.357
+    distance_to_trajectory_m: 0.088
+    verified_on_robot: false
+  - id: panel_house_view_4
+    x: -1.506
+    y: 1.685
+    yaw: -0.904
+    side: NW
+    observes: Северный торец и северная часть западного газона
+    clearance_m: 0.325
+    distance_to_center_m: 1.362
+    distance_to_trajectory_m: 0.086
+    verified_on_robot: false
+  notes:
+  - 'Восточная стена в облаке двоится: x≈-0.51 и x≈-0.34 (дрейф между проездами).
+    За стену принят x=-0.51 (ширина 0.50 м совпадает с регламентом); занятость field.pgm
+    тянется до x≈-0.35.'
+  - Северная дорога западнее x≈-0.2 (y 1.5–1.9) робот не проезжал, зазор по field.pgm
+    ≤ 0.20 м. Поэтому точку напротив северного торца (-0.76, 1.75) не ставил, торец
+    виден с точки 4.
+  - 'Покрытие газона при HFOV 60° без доворота: точки по отдельности 14–38 %, вместе
+    ~95 %; с доворотом ±30° — 100 %.'
+  - С точки 2 луч к центру дома задевает занятые клетки двойной восточной стены (x≈-0.24…-0.34)
+    — это размытие карты, а не препятствие.
+- id: park
+  name: Сквер с кустами и деревьями
+  category: vegetation
+  description: 'Квадратная зелёная площадка (одна ячейка) с кустами, хвойными деревцами
+    и тёмным лежащим цилиндром (бревно или покрышка). С севера — северный мост, с
+    востока — восточный мост, с юга — затор машинок, с запада — дорога вдоль панельного
+    дома. В северо-западном углу большой круглый куст. '
+  keywords:
+  - сквер
+  - парк
+  - газон
+  - зелёная зона
+  - кусты
+  - деревья
+  - ёлочки
+  - клумба
+  - зелёная площадка
+  - между мостами
+  shape: box
+  center:
+  - 0.87
+  - 0.951
+  footprint:
+  - - 0.452
+    - 0.537
+  - - 1.288
+    - 0.537
+  - - 1.288
+    - 1.365
+  - - 0.452
+    - 1.365
+  uncertain: true
+  movable: false
+  surroundings:
+  - id: park_area
+    type: lawn
+    description: Вся площадка сквера
+    footprint:
+    - - 0.452
+      - 0.537
+    - - 1.288
+      - 0.537
+    - - 1.288
+      - 1.365
+    - - 0.452
+      - 1.365
+    exclude_footprint: false
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/park_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:05:38
+    view: 'С юго-запада: кусты, деревца, тёмный цилиндр; справа затор'
+  - image: references/park_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:06:53
+    view: 'С северо-запада: большой круглый куст у южных перил северного моста'
+  viewpoints:
+  - id: park_view_1
+    x: 0.114
+    y: 0.095
+    yaw: 0.847
+    side: SW
+    observes: Юго-западная половина сквера; справа край затора
+    clearance_m: 0.352
+    distance_to_center_m: 1.142
+    distance_to_trajectory_m: 0.031
+    verified_on_robot: false
+  - id: park_view_2
+    x: 0.134
+    y: 0.765
+    yaw: 0.248
+    side: W
+    observes: Западная кромка и центр сквера
+    clearance_m: 0.263
+    distance_to_center_m: 0.759
+    distance_to_trajectory_m: 0.027
+    low_clearance_ok: true
+    low_clearance_reason: по field.pgm проход уже 0.60 м, но робот проезжал/стоял
+      здесь (см. distance_to_trajectory_m); проверить на роботе
+    verified_on_robot: false
+  - id: park_view_3
+    x: 0.094
+    y: 1.665
+    yaw: -0.744
+    side: NW
+    observes: Северо-западный угол сквера и большой куст у въезда на северный мост
+    clearance_m: 0.3
+    distance_to_center_m: 1.055
+    distance_to_trajectory_m: 0.013
+    low_clearance_ok: true
+    low_clearance_reason: по field.pgm проход уже 0.60 м, но робот проезжал/стоял
+      здесь (см. distance_to_trajectory_m); проверить на роботе
+    verified_on_robot: false
+    clearance_note: Предварительно по новой карте постоянной геометрии; препятствия
+      проверяет Nav2
+  notes:
+  - Облако над сквером (z 0.15–0.3 м) — кусты и деревья, отдельных контуров не выделить.
+  - 'Синей воды из рисунка 3 регламента на видео не видно: на этом полигоне между
+    мостами сквер.'
+- id: bridge_north
+  name: Северный мост
+  category: bridge
+  description: Низкий мост-горка с жёлтыми перилами по обеим сторонам на северной
+    дороге вдоль северной стены (+Y). Ведёт с запада на восток к северо-восточному
+    углу. Южнее моста — сквер и большой куст.
+  keywords:
+  - мост
+  - северный мост
+  - мостик
+  - жёлтые перила
+  - жёлтое ограждение
+  - горка
+  - переезд
+  - мост у северной стены
+  shape: box
+  center:
+  - 0.87
+  - 1.71
+  footprint:
+  - - 0.452
+    - 1.45
+  - - 1.288
+    - 1.45
+  - - 1.288
+    - 1.97
+  - - 0.452
+    - 1.97
+  uncertain: true
+  movable: false
+  surroundings:
+  - id: bridge_north_deck
+    type: bridge_deck
+    description: Проезжая часть моста и въезды
+    footprint:
+    - - 0.452
+      - 1.45
+    - - 1.288
+      - 1.45
+    - - 1.288
+      - 1.97
+    - - 0.452
+      - 1.97
+    exclude_footprint: false
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/bridge_north_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:07:21
+    view: 'С запада, от въезда: перила с обеих сторон, справа большой куст'
+  - image: references/bridge_north_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:07:39
+    view: 'На мосту: перила вплотную, впереди разметка поворота в углу'
+  viewpoints:
+  - id: bridge_north_view_1
+    x: 0.094
+    y: 1.665
+    yaw: 0.0
+    side: W
+    observes: Въезд и настил моста с запада, вдоль оси проезда
+    clearance_m: 0.246
+    distance_to_center_m: 0.777
+    distance_to_trajectory_m: 0.013
+    low_clearance_ok: true
+    low_clearance_reason: по field.pgm проход уже 0.60 м, но робот проезжал/стоял
+      здесь (см. distance_to_trajectory_m); проверить на роботе
+    verified_on_robot: false
+  - id: bridge_north_view_2
+    x: 1.674
+    y: 1.665
+    yaw: 3.141
+    side: E
+    observes: Съезд и настил моста с востока (из северо-восточного угла)
+    clearance_m: 0.249
+    distance_to_center_m: 0.805
+    distance_to_trajectory_m: 0.005
+    low_clearance_ok: true
+    low_clearance_reason: по field.pgm проход уже 0.60 м, но робот проезжал/стоял
+      здесь (см. distance_to_trajectory_m); проверить на роботе
+    verified_on_robot: false
+  notes:
+  - 'Проходим: робот стоял у западного въезда 06:45–07:35 и проехал мост 07:37–07:43
+    (i≈915–930).'
+  - Ширина проезда между перилами не измерена, на кадрах 07:37–07:39 перила почти
+    касаются кадра — узкое место.
+- id: bridge_east
+  name: Восточный мост
+  category: bridge
+  description: Низкий мост-горка с жёлтыми перилами на восточной дороге вдоль восточной
+    стены (+X), между северо-восточным углом и участком напротив затора. С моста на
+    юг виден Стакан.
+  keywords:
+  - мост
+  - восточный мост
+  - мостик
+  - жёлтые перила
+  - жёлтое ограждение
+  - горка
+  - переезд
+  - мост у восточной стены
+  shape: box
+  center:
+  - 1.74
+  - 0.951
+  footprint:
+  - - 1.48
+    - 0.537
+  - - 2.0
+    - 0.537
+  - - 2.0
+    - 1.365
+  - - 1.48
+    - 1.365
+  uncertain: true
+  movable: false
+  surroundings:
+  - id: bridge_east_deck
+    type: bridge_deck
+    description: Проезжая часть моста и въезды
+    footprint:
+    - - 1.48
+      - 0.537
+    - - 2.0
+      - 0.537
+    - - 2.0
+      - 1.365
+    - - 1.48
+      - 1.365
+    exclude_footprint: false
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/bridge_east_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:08:03
+    view: 'С севера (из угла): перила, вдали Стакан'
+  - image: references/bridge_east_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:09:10
+    view: 'С юга: въезд на мост, перила с обеих сторон'
+  viewpoints:
+  - id: bridge_east_view_1
+    x: 1.674
+    y: 1.665
+    yaw: -1.571
+    side: N
+    observes: Въезд и настил моста с севера, вдоль оси проезда
+    clearance_m: 0.249
+    distance_to_center_m: 0.717
+    distance_to_trajectory_m: 0.005
+    low_clearance_ok: true
+    low_clearance_reason: по field.pgm проход уже 0.60 м, но робот проезжал/стоял
+      здесь (см. distance_to_trajectory_m); проверить на роботе
+    verified_on_robot: false
+  - id: bridge_east_view_2
+    x: 1.804
+    y: 0.185
+    yaw: 1.571
+    side: S
+    observes: Въезд и настил моста с юга, вдоль оси проезда
+    clearance_m: 0.333
+    distance_to_center_m: 0.769
+    distance_to_trajectory_m: 0.026
+    verified_on_robot: false
+  notes:
+  - 'Проходим: робот проехал мост с севера на юг 08:07–08:17 (i≈975–995) и заезжал
+    на южный пандус 09:18–09:22.'
+  - Южный въезд по видео ≈ y 0.5 (с точки 2 пандус начинается в ~0.35 м впереди).
+- id: traffic_jam
+  name: Затор из машинок
+  category: obstacle
+  description: 'Скопление игрушечных машин 1:32: белая перевёрнутая, оранжевый и синий
+    пикапы, тёмный внедорожник, синий грузовик. Перекрывает дорогу между Стаканом
+    (юг) и сквером (север). Положение может меняться между попытками.'
+  keywords:
+  - затор
+  - пробка
+  - машины
+  - машинки
+  - автомобили
+  - перевёрнутая машина
+  - авария
+  - ДТП
+  - оранжевый пикап
+  - синий пикап
+  shape: box
+  center:
+  - 0.87
+  - 0.124
+  footprint:
+  - - 0.452
+    - -0.29
+  - - 1.288
+    - -0.29
+  - - 1.288
+    - 0.537
+  - - 0.452
+    - 0.537
+  uncertain: true
+  movable: true
+  surroundings:
+  - id: traffic_jam_area
+    type: road
+    description: Участок дороги с машинами и обочины
+    footprint:
+    - - 0.452
+      - -0.29
+    - - 1.288
+      - -0.29
+    - - 1.288
+      - 0.537
+    - - 0.452
+      - 0.537
+    exclude_footprint: false
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/traffic_jam_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:05:44
+    view: 'С запада вблизи: машины, за ними Стакан'
+  - image: references/traffic_jam_02.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:03:28
+    view: 'С востока: машины на дороге перед панельным домом'
+  viewpoints:
+  - id: traffic_jam_view_1
+    x: 0.114
+    y: 0.095
+    yaw: 0.038
+    side: W
+    observes: Затор с западного края, вдоль дороги
+    clearance_m: 0.352
+    distance_to_center_m: 0.757
+    distance_to_trajectory_m: 0.031
+    verified_on_robot: false
+  - id: traffic_jam_view_2
+    x: 1.804
+    y: 0.185
+    yaw: -3.076
+    side: E
+    observes: Затор с восточного края, вдоль дороги
+    clearance_m: 0.333
+    distance_to_center_m: 0.936
+    distance_to_trajectory_m: 0.026
+    verified_on_robot: false
+  notes:
+  - 'Подвижное препятствие: не использовать как постоянный ориентир для локализации.'
+- id: rubble
+  name: Завал у разрушенного торца дома
+  category: obstacle
+  description: Обломки (тёмные фрагменты и серый кусок стены) у южного, разрушенного
+    торца панельного дома и к югу от него. По регламенту — завал из фрагментов ПВХ.
+    Может меняться между попытками.
+  keywords:
+  - завал
+  - обломки
+  - руины
+  - обрушение
+  - развалины
+  - куча обломков
+  - строительный мусор
+  - мусор
+  shape: box
+  center:
+  - -0.825
+  - -0.605
+  footprint:
+  - - -1.2
+    - -0.95
+  - - -0.45
+    - -0.95
+  - - -0.45
+    - -0.26
+  - - -1.2
+    - -0.26
+  uncertain: true
+  movable: true
+  surroundings:
+  - id: rubble_area
+    type: debris
+    description: Площадка с обломками к югу от дома
+    footprint:
+    - - -1.2
+      - -0.95
+    - - -0.45
+      - -0.95
+    - - -0.45
+      - -0.26
+    - - -1.2
+      - -0.26
+    exclude_footprint: false
+    uncertain: true
+    victim_candidate: true
+  references:
+  - image: references/rubble_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:04:40
+    view: 'С юго-востока: обломки у разрушенного торца, слева разметка парковки'
+  viewpoints:
+  - id: rubble_view_1
+    x: -0.056
+    y: -0.615
+    yaw: 3.129
+    side: E
+    observes: Завал с востока, от дороги x≈0 (то же место, что panel_house_view_3,
+      другой yaw)
+    clearance_m: 0.382
+    distance_to_center_m: 0.769
+    distance_to_trajectory_m: 0.088
+    verified_on_robot: false
+  - id: rubble_view_2
+    x: -0.746
+    y: -1.265
+    yaw: 1.69
+    side: S
+    observes: Завал с юга и разрушенный торец за ним
+    clearance_m: 0.343
+    distance_to_center_m: 0.665
+    distance_to_trajectory_m: 0.102
+    verified_on_robot: false
+  notes:
+  - 'Подвижное препятствие. Точный контур обломков не выделяется: облако низкое и
+    шумное.'
+landmarks:
+- id: crosswalk_south
+  name: Южная зебра (у разрушенного торца)
+  category: road_marking
+  description: Жёлто-белая зебра поперёк дороги x≈0 между разрушенным торцом дома
+    и Стаканом
+  keywords:
+  - пешеходный переход
+  - зебра
+  - жёлто-белая зебра
+  - переход у разрушенного дома
+  center:
+  - 0.0
+  - -0.4
+  uncertain: true
+  references:
+  - image: references/crosswalk_south_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:04:56
+    view: 'С юга: зебра перед разрушенным торцом'
+- id: crosswalk_north
+  name: Северная зебра (у сквера)
+  category: road_marking
+  description: Жёлто-белая зебра поперёк дороги x≈0 напротив середины дома, у западного
+    края сквера
+  keywords:
+  - пешеходный переход
+  - зебра
+  - переход у сквера
+  - жёлто-белая зебра
+  center:
+  - 0.03
+  - 0.75
+  uncertain: true
+  references:
+  - image: references/crosswalk_north_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:05:20
+    view: 'С юга: зебра, справа кусты сквера'
+- id: parking
+  name: Парковка (белая разметка)
+  category: road_marking
+  description: Белые прямоугольные парковочные места к югу от панельного дома, у южной
+    дороги
+  keywords:
+  - парковка
+  - стоянка
+  - белая разметка
+  - парковочные места
+  center:
+  - -0.6
+  - -1.05
+  uncertain: true
+  references:
+  - image: references/parking_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:04:36
+    view: 'С востока: белая разметка парковки справа'
+- id: big_bush
+  name: Большой круглый куст у северного моста
+  category: vegetation
+  description: Крупный шарообразный куст в северо-западном углу сквера, у южных перил
+    западного въезда на северный мост
+  keywords:
+  - большой куст
+  - круглый куст
+  - куст у моста
+  - дерево у моста
+  center:
+  - 0.55
+  - 1.4
+  uncertain: true
+  references:
+  - image: references/big_bush_01.jpg
+    source_video: Бобус___проезд_2026-09-28.mp4
+    timestamp: 00:07:05
+    view: 'С запада: куст справа от въезда на северный мост'
+special_areas:
+- id: bridge_north_passage
+  type: bridge
+  object: bridge_north
+  footprint:
+  - - 0.452
+    - 1.45
+  - - 1.288
+    - 1.45
+  - - 1.288
+    - 1.97
+  - - 0.452
+    - 1.97
+  direction_yaw:
+  - 0.0
+  - 3.142
+  comment: 'Мост-горка 55 мм с перилами. Проходим, робот проехал его на запись (07:37–07:43).
+    Узко: ширина между перилами не измерена. Непроходимым из-за высоты не считать.'
+  uncertain: true
+- id: bridge_east_passage
+  type: bridge
+  object: bridge_east
+  footprint:
+  - - 1.48
+    - 0.537
+  - - 2.0
+    - 0.537
+  - - 2.0
+    - 1.365
+  - - 1.48
+    - 1.365
+  direction_yaw:
+  - 1.571
+  - -1.571
+  comment: Мост-горка 55 мм с перилами. Проходим, робот проехал его с севера на юг
+    (08:07–08:17). Узко, ширина между перилами не измерена.
+  uncertain: true
+- id: ne_corner_turn
+  type: narrow_passage
+  footprint:
+  - - 1.288
+    - 1.365
+  - - 2.12
+    - 1.365
+  - - 2.12
+    - 2.19
+  - - 1.288
+    - 2.19
+  comment: 'Угол между двумя мостами: поворот на 90° сразу после съезда. Зазор по
+    field.pgm ~0.25 м; робот поворачивал здесь (07:43–07:57), упираясь камерой в стену.'
+- id: south_lane_under_tower
+  type: narrow_passage
+  footprint:
+  - - 0.45
+    - -1.8
+  - - 1.3
+    - -1.8
+  - - 1.3
+    - -1.3
+  - - 0.45
+    - -1.3
+  comment: 'Южная дорога под Стаканом: зазор по field.pgm 0.27–0.29 м (< 0.30). Робот
+    проезжал здесь дважды (01:40–02:15 и 03:57–04:35).'
+- id: west_lane
+  type: narrow_passage
+  footprint:
+  - - -1.9
+    - -1.3
+  - - -1.25
+    - -1.3
+  - - -1.25
+    - 1.95
+  - - -1.9
+    - 1.95
+  comment: 'Западная дорога вдоль дома: зазор по field.pgm 0.16–0.31 м, местами уже
+    габарита. Робот проехал её на юг (00:47–01:10).'
+- id: center_lane
+  type: narrow_passage
+  footprint:
+  - - -0.3
+    - -1.3
+  - - 0.42
+    - -1.3
+  - - 0.42
+    - 1.5
+  - - -0.3
+    - 1.5
+  comment: 'Дорога x≈0 между домом и Стаканом/затором/сквером: зазор по field.pgm
+    0.20–0.38 м. Две зебры. Робот проехал её на север (04:40–06:40).'
+- id: north_lane_west
+  type: uncertain_area
+  footprint:
+  - - -1.3
+    - 1.45
+  - - -0.15
+    - 1.45
+  - - -0.15
+    - 1.95
+  - - -1.3
+    - 1.95
+  comment: 'Северная дорога западнее x≈-0.15: робот здесь не ездил, зазор по field.pgm
+    ≤ 0.20 м. Отсутствие точек не означает свободный проезд — проверить на роботе.'
+- id: house_east_double_wall
+  type: uncertain_area
+  footprint:
+  - - -0.56
+    - -0.15
+  - - -0.3
+    - -0.15
+  - - -0.3
+    - 1.3
+  - - -0.56
+    - 1.3
+  comment: Восточная стена дома в облаке двоится (x≈-0.51 и x≈-0.34), это размытие
+    карты. Реальная стена принята на x=-0.51.
+- id: person_trace_north
+  type: human_trace
+  footprint:
+  - - 0.1
+    - 1.35
+  - - 0.45
+    - 1.35
+  - - 0.45
+    - 2.0
+  - - 0.1
+    - 2.0
+  comment: Высокие точки облака z 0.5–1.9 м у западного въезда на северный мост —
+    вероятно, человек во время записи. Постоянным объектом не считать.
+notes:
+- 'Стороны света в описаниях условные, по осям map: север = +Y, восток = +X, юг =
+  -Y, запад = -X. «Слева/справа» в тексте миссии зависят от точки зрения — LLM должна
+  сопоставлять по объектам, а не по этим словам.'
+- 'Синхронизация видео и траектории — гипотеза: t ≈ i / 1.993 с (1181 поза на 592.5
+  с, ≈2 Гц). Подтверждена стоянкой 0:00–0:47 (i 0–~92), поворотами у стен (1:10–1:15,
+  2:15, 7:45–7:55), проездом мостов (07:39, 08:11) и положением объектов на всех кадрах
+  из references. Точность около ±5 с; для измерения поз не использовать.'
+- 'Оценочная сетка 5×5 по облаку: стены x -2.056…2.122, y -1.947…2.193, ячейка ≈0.83
+  м. Центры Стакана (0.84, -0.75) и дома (-0.76, 0.55) попадают в центры своих ячеек
+  с точностью до 0.05 м. Мосты, сквер и затор привязаны к этой сетке, это оценка,
+  а не измерение.'
+- 'Стены периметра в облаке размыты или двоятся на 0.1–0.2 м (фит по линиям: x≈-2.06
+  и 2.12, y≈-1.95 и 2.19, наклон до 1.6°). За северной и восточной стенами — высокие
+  точки людей.'
+- 'Измерено по облаку: центр и радиус Стакана; западная, восточная и северная стены
+  дома. Остальные контуры (площадки, мосты, сквер, затор, завал, ориентиры) приблизительные,
+  у них uncertain: true.'
+- Точки с low_clearance_ok стоят в местах, где по field.pgm проход уже 0.60 м, но
+  робот там фактически проезжал или стоял (distance_to_trajectory_m ≤ 0.03 м). field.pgm
+  раздут размытием облака, поэтому такие места проверить на роботе в первую очередь.
+- 'Покрытие площадок (tools/coverage.py): видимость с учётом HFOV, дальности 1.5 м
+  и заслонения зданиями. Высоту камеры, кусты и машинки модель не учитывает.'
+- Бензовоз и упавшую берёзу из регламента на видео не нашёл. Тёмный лежащий цилиндр
+  в сквере (кадр 00:05:38) может быть бревном или покрышкой — уточнить.
+- 'Открытый вопрос: регламент требует, чтобы семантическую карту строил робот на тренировочных
+  заездах. Можно ли использовать заранее размеченную карту на попытке — решают команда
+  и судьи.'
+- 'Открытый вопрос: где старт соревнования и начальное направление (start = null).'
+- 'Открытый вопрос: HFOV и высота камеры Decxin 2923v1 на салазках; габариты робота.'
+qr_size_m: 0.08
+
+road_network:
+  nodes:
+    sw: [-1.65, -1.52]
+    sc: [0.10, -1.52]
+    se: [1.72, -1.52]
+    center: [0.10, 0.15]
+    east: [1.72, 0.15]
+    nw: [-1.65, 1.71]
+    nc: [0.10, 1.71]
+    ne: [1.72, 1.71]
+  edges:
+    - [sw, sc]
+    - [sc, se]
+    - [se, east]
+    - [east, ne]
+    - [ne, nc]
+    - [nc, nw]
+    - [nw, sw]
+    - [sc, center]
+    - [center, nc]
+    - [center, east]

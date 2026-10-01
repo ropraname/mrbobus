@@ -74,7 +74,8 @@ subs=[node.create_subscription(Odometry,'/odom',lambda m:latest.update(odom=m),1
 pub=node.create_publisher(TwistStamped,'/diff_drive_controller/cmd_vel',10)
 clients={k:node.create_client(t,'/controller_manager/'+k) for k,t in [('list_controllers',ListControllers),('switch_controller',SwitchController)]}
 log_path=Path('/tmp/mrbobus-odrive-vcan.log');log=log_path.open('w')
-proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0','current_limit:='+str(test_current),'gain_profile:='+('soft' if fault_kind=='soft' else 'existing')] + (['stop_file:='+str(stop_path)] if fault_kind=='stop' else []),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+profile=os.environ.get('MRBOBUS_TEST_PROFILE','bench')
+proc=subprocess.Popen(['ros2','launch','mrbobus_bringup','control.launch.py','can:=vcan0','profile:='+profile,'current_limit:='+str(test_current),'gain_profile:='+os.environ.get('MRBOBUS_TEST_GAINS', 'soft' if fault_kind=='soft' else 'existing')] + (['stop_file:='+str(stop_path)] if fault_kind=='stop' else []),stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
 
 def wait_for(predicate,timeout=10.):
     end=time.monotonic()+timeout
@@ -103,18 +104,31 @@ try:
     request=SwitchController.Request();request.activate_controllers=['diff_drive_controller'];request.strictness=2
     assert service('switch_controller',request).ok
     wait_for(lambda:all(s==8 for s in state.values()))
+    if os.environ.get('MRBOBUS_TEST_GAINS') in ('responsive','reversal_soft','p_only','p_probe_upper','turn_pi'):
+        assert len(gains)==4,gains
+        for n in range(4):
+            p_scale=5 if os.environ.get('MRBOBUS_TEST_GAINS')=='turn_pi' else 6.5 if os.environ.get('MRBOBUS_TEST_GAINS')=='p_probe_upper' else 4 if os.environ.get('MRBOBUS_TEST_GAINS')=='responsive' else 1
+            i_scale=0 if os.environ.get('MRBOBUS_TEST_GAINS') in ('p_only','p_probe_upper') else 1
+            expected=(1.,.5) if n<2 else (.53,.265)
+            if os.environ.get('MRBOBUS_TEST_GAINS')!='turn_pi':expected=(.2*p_scale,.5*i_scale) if n<2 else (.106*p_scale,i_scale/6.)
+            assert all(abs(x-y)<1e-6 for x,y in zip(gains[n],expected)),gains
     if fault_kind=='soft':
         assert all(abs(gains[n][0]-(.05 if n<2 else .0265))<1e-6 for n in range(4)),gains
     drive(.01,0.,3.)
     assert len(limits)==4 and all(abs(v[1]-test_current)<1e-5 for v in limits.values()),limits
+    assert all(abs(v[0]-3.)<1e-5 for v in limits.values()),limits
     wait_for(lambda:'odom' in latest and latest['odom'].pose.pose.position.x>.01)
     assert velocity[0]>0 and velocity[3]>0 and velocity[1]<0 and velocity[2]<0,velocity
     assert max(peak.values()) <= .1+1e-5,peak
     measured=latest['odom'].pose.pose.position.x
+    if profile=='floor':
+        drive(.5,.6,8.)
+        assert max(peak.values()) <= 14./(2*math.pi)+1e-5,peak
+        assert max(peak.values()) > 2., 'New floor speed was not reached'
     before=dict(counts);drive(.01,0.,.5)
     assert all(counts[n]-before[n]>15 for n in state), 'Setpoint not repeated every cycle'
     start=time.monotonic()
-    wait_for(lambda:all(abs(v)<1e-5 for v in velocity.values()),2.)
+    wait_for(lambda:all(abs(v)<1e-5 for v in velocity.values()),3.5 if profile=='floor' else 2.)
     timeout=time.monotonic()-start
     # Lifecycle deactivation must send Idle to every drive; explicit reactivation is required.
     disable=SwitchController.Request();disable.deactivate_controllers=['diff_drive_controller'];disable.strictness=2
@@ -131,6 +145,22 @@ try:
     wait_for(lambda:all(s==1 for s in state.values()),2.)
     drive(.01,0.,.4)
     assert all(s==1 for s in state.values()),'Fault must not auto-rearm'
+    if fault_kind=='stop':
+        # Releasing STOP and publishing commands must not re-enable motors.
+        stop_path.write_text('1')
+        drive(.01,0.,.5)
+        assert all(s==1 for s in state.values()),'STOP release auto-rearmed motors'
+        # An explicit controller switch must work without restarting the process.
+        assert proc.poll() is None
+        assert service('switch_controller',disable).ok
+        started=time.monotonic()
+        assert service('switch_controller',request).ok
+        wait_for(lambda:all(s==8 for s in state.values()))
+        rearm_seconds=time.monotonic()-started
+        assert rearm_seconds<1., 'Warm rearm too slow'
+        stop_path.write_text('0')
+        wait_for(lambda:all(s==1 for s in state.values()),2.)
+        print(json.dumps({'warm_rearm_seconds':rearm_seconds,'stop_release_stays_idle':True}))
     print(json.dumps({'result':'PASS','forward_m':measured,'timeout_stop_s':timeout,
                       'peak_motor_rps':peak,'fault_stops_all':fault_kind,'lifecycle_idle':True,'startup_idle':True},indent=2))
 finally:

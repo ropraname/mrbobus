@@ -12,3 +12,10 @@ secrets/
 *.bag
 *.mcap
 *.db3
+.env.*
+!.env.example
+*.pem
+*.key
+*.gguf
+*.safetensors
+records/

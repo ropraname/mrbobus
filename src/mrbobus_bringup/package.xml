@@ -3,7 +3,7 @@
   <name>mrbobus_bringup</name><version>0.1.0</version>
   <description>MRBOBUS standard ros2_control bring-up and offline validation.</description>
   <maintainer email="maintainers@example.invalid">MRBOBUS team</maintainer>
-  <license>Proprietary</license>
+  <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <exec_depend>robot_base</exec_depend>
   <exec_depend>odrive_ros2_control</exec_depend>

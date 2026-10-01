@@ -27,9 +27,9 @@ class MotionGate:
             if isinstance(v,bool) or isinstance(w,bool):raise ValueError('Некорректная скорость')
             v=float(v);w=float(w)
             if not math.isfinite(v) or not math.isfinite(w):raise ValueError('Некорректная скорость')
-            v=max(-.15,min(.15,v));w=max(-.3,min(.3,w))
+            v=max(-.50,min(.50,v));w=max(-.6,min(.6,w))
             # Match the hardware wheel-command cap even with simultaneous turn/drive.
             demand=abs(v)+abs(w)*.29174/2
-            scale=min(1.,(.045*4.5)/max(demand,1e-9))
+            scale=min(1.,(.045*14.)/max(demand,1e-9))
             self.last_seq=seq
             return v*scale,w*scale

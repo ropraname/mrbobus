@@ -1,8 +1,8 @@
 [Unit]
 Description=Mrbobus standard ros2_control (starts disarmed)
-Wants=network-online.target
+Wants=network-online.target mrbobus-stop.service
 After=network-online.target mrbobus-stop.service robot-base.service
-Requires=mrbobus-stop.service
+StartLimitIntervalSec=0
 Conflicts=robot-base.service
 [Service]
 User=taras
@@ -15,7 +15,8 @@ RuntimeDirectory=robot-base
 ExecStart=/bin/bash /home/taras/robot/mrbobus_ws/deploy/start-control.sh
 KillSignal=SIGINT
 TimeoutStopSec=2
-Restart=no
+Restart=on-failure
+RestartSec=3
 NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target

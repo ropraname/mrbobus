@@ -2,7 +2,7 @@
 """Read legacy ODrive ASCII settings; optionally correct torque/Hall settings in RAM.
 
 Example: --port /dev/ttyACM0 --apply-current-limit 15
-Never arms motors, calibrates, saves flash, or reboots. Both axes must be Idle.
+Never arms motors or calibrates. --save explicitly persists settings and may reboot. Both axes must be Idle.
 """
 import argparse
 import datetime
@@ -21,12 +21,16 @@ target_group=p.add_mutually_exclusive_group()
 target_group.add_argument('--apply-current-limit',type=float,default=None)
 target_group.add_argument('--torque-limit',type=float,default=None,help='Explicit torque ceiling in Nm (up to 2); current limit is separate')
 p.add_argument('--hall-cpr',type=int,choices=[60],help='Verified direct-drive Hall geometry: 60 CPR and 10 pole pairs')
+p.add_argument('--hall-bandwidth',type=float,help='Hall estimator bandwidth in RAM, 20–100')
+p.add_argument('--save',action='store_true',help='Explicitly save verified settings; firmware may reboot')
 p.add_argument('--backup-dir',default='.local/odrive-backups')
 a=p.parse_args()
 if a.apply_current_limit is not None and not 1<=a.apply_current_limit<=15:
     p.error('Requested equivalent current must be 1–15 A')
 if a.torque_limit is not None and not 0<a.torque_limit<=2:
     p.error('Torque limit must be in (0,2] Nm')
+if a.hall_bandwidth is not None and not 20<=a.hall_bandwidth<=100:
+    p.error('Hall bandwidth must be 20–100')
 fd=os.open(a.port,os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK)
 original=termios.tcgetattr(fd)
 def write(command):os.write(fd,(command+'\n').encode('ascii'))
@@ -42,7 +46,7 @@ def read(field):
     raise RuntimeError('No ASCII reply for '+field)
 def number(field):
     value=float(read(field))
-    if not math.isfinite(value) and not (field.endswith('.motor.config.torque_lim') and value==math.inf):
+    if not math.isfinite(value) and not (field.endswith(('.motor.config.torque_lim','.controller.config.vel_integrator_limit')) and value==math.inf):
         raise RuntimeError('Non-finite '+field)
     return value
 try:
@@ -53,9 +57,13 @@ try:
     before={}
     for axis in ('axis0','axis1'):
         before[axis]={key:number(axis+'.'+key) for key in (
-            'current_state','config.can.node_id','motor.config.torque_lim',
+            'current_state','config.startup_closed_loop_control','config.startup_motor_calibration',
+            'config.startup_encoder_offset_calibration','config.startup_encoder_index_search','config.startup_homing','config.can.node_id','motor.config.torque_lim',
             'motor.config.torque_constant','motor.config.current_lim',
             'controller.config.vel_gain','controller.config.vel_integrator_gain','encoder.config.bandwidth',
+            'controller.config.vel_integrator_limit','controller.config.vel_limit',
+            'controller.config.vel_limit_tolerance','controller.config.spinout_mechanical_power_threshold',
+            'controller.config.spinout_electrical_power_threshold',
             'encoder.config.mode','encoder.config.cpr','motor.config.pole_pairs',
             'encoder.config.phase_offset','encoder.config.phase_offset_float')}
     if {int(v['config.can.node_id']) for v in before.values()} not in ({0,1},{2,3}):
@@ -75,7 +83,14 @@ try:
             if values['encoder.config.mode']!=1 or pair not in ((12,72),(10,60)):
                 raise RuntimeError('Expected Hall 12/72 or already corrected 10/60')
             targets[axis].update({'motor.config.pole_pairs':10,'encoder.config.cpr':60})
-    if any(targets.values()):
+    if a.hall_bandwidth is not None:
+        for axis,values in before.items():
+            if values['encoder.config.mode']!=1 or values['encoder.config.cpr']!=60:
+                raise RuntimeError('Expected verified 60 CPR Hall encoder')
+            targets[axis]['encoder.config.bandwidth']=a.hall_bandwidth
+    if a.save and any(v[k]!=0 for v in before.values() for k in v if k.startswith('config.startup_')):
+        raise RuntimeError('Refusing save with automatic motor startup enabled')
+    if any(targets.values()) or a.save:
         directory=Path(a.backup_dir);directory.mkdir(parents=True,exist_ok=True)
         backup=directory/(datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+serial+'.json')
         backup.write_text(json.dumps({'serial':serial,'port':a.port,'before':before,'requested_settings':targets},indent=2))
@@ -95,8 +110,12 @@ try:
                     write(f"w {axis}.{key} {before[axis][key]:.9g}")
                     time.sleep(.05)
             raise
-        print(json.dumps({'applied_in_ram':targets,'backup':str(backup),'flash_saved':False},indent=2))
+        if a.save:
+            if any(number(x+'.current_state')!=1 for x in before):raise RuntimeError('Axis left Idle before save')
+            write('ss');time.sleep(.3)
+        print(json.dumps({'save_requested':a.save,'applied_in_ram':targets,'backup':str(backup),'flash_saved':False},indent=2))
 
 finally:
-    termios.tcsetattr(fd,termios.TCSANOW,original)
+    try:termios.tcsetattr(fd,termios.TCSANOW,original)
+    except (OSError,termios.error):pass
     os.close(fd)

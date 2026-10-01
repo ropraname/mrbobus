@@ -1,10 +1,10 @@
 diff_drive_controller:
   ros__parameters:
-    linear.x.max_velocity: 0.15
-    linear.x.min_velocity: -0.15
-    linear.x.max_acceleration: 0.04
-    linear.x.max_deceleration: -0.10
-    angular.z.max_velocity: 0.3
-    angular.z.min_velocity: -0.3
-    angular.z.max_acceleration: 0.15
-    angular.z.max_deceleration: -0.3
+    linear.x.max_velocity: 0.50
+    linear.x.min_velocity: -0.50
+    linear.x.max_acceleration: 0.08
+    linear.x.max_deceleration: -0.20
+    angular.z.max_velocity: 0.6
+    angular.z.min_velocity: -0.6
+    angular.z.max_acceleration: 0.8
+    angular.z.max_deceleration: -0.8

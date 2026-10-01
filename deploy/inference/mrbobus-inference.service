@@ -1,0 +1,17 @@
+[Unit]
+Description=Local mission and vision model (no robot control)
+After=network.target
+
+[Service]
+Type=simple
+User=mrbobus
+SupplementaryGroups=render
+WorkingDirectory=/home/mrbobus/robot/inference
+ExecStart=/home/mrbobus/robot/inference/llama.cpp/build/bin/llama-server --model /home/mrbobus/robot/models/gemma-4-26b-a4b/gemma-4-26B-A4B-it-Q4_0.gguf --mmproj /home/mrbobus/robot/models/gemma-4-26b-a4b/mmproj-gemma-4-26B-A4B-it-Q8_0.gguf --alias robot-model --host 192.168.67.140 --port 8088 --ctx-size 4096 --parallel 1 --threads 4 --threads-batch 8 --fit-target 2048 --batch-size 256 --ubatch-size 128 --no-mmproj-offload --jinja --reasoning off
+Restart=on-failure
+RestartSec=5
+MemoryMax=26G
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

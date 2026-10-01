@@ -17,7 +17,14 @@ class FieldMap:
         path=self.root/'field.npz'
         if not path.exists():return
         a=np.load(path);self.points=a['points'];self.bounds=a['bounds'];self.recorded_path=a['trajectory']
-        self.data=json.dumps({'id':'field-20260928','points':np.round(self.points.astype(float),3).tolist(),'bounds':self.bounds.tolist(),'trajectory':np.round(self.recorded_path.astype(float),3).tolist()}).encode()
+        # Optional field-specific crop affects saved reference only, never live obstacles.
+        crop=self.root/'reference_filter.json'
+        if crop.exists():
+            c=json.loads(crop.read_text());p=self.points
+            inside=(p[:,0]>=c['xmin'])&(p[:,0]<=c['xmax'])&(p[:,1]>=c['ymin'])&(p[:,1]<=c['ymax'])
+            edge=(p[:,0]<c['xmin']+c['edge_width'])|(p[:,0]>c['xmax']-c['edge_width'])|(p[:,1]<c['ymin']+c['edge_width'])|(p[:,1]>c['ymax']-c['edge_width'])
+            self.points=p[inside&(~edge|(p[:,2]<=c['edge_max_z']))]
+        self.data=json.dumps({'id':self.root.name,'points':np.round(self.points.astype(float),3).tolist(),'bounds':self.bounds.tolist(),'trajectory':np.round(self.recorded_path.astype(float),3).tolist()}).encode()
         goals=self.root/'goals.json'
         if goals.exists():self.goals=json.loads(goals.read_text())
     def validate(self,data):

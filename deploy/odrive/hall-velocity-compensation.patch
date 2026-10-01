@@ -1,0 +1,101 @@
+diff --git a/Firmware/MotorControl/controller.cpp b/Firmware/MotorControl/controller.cpp
+index 11c85b4..2d388bc 100644
+--- a/Firmware/MotorControl/controller.cpp
++++ b/Firmware/MotorControl/controller.cpp
+@@ -10,6 +10,7 @@ bool Controller::apply_config() {
+ }
+ 
+ void Controller::reset() {
++    hall_velocity_compensator_.reset();
+     // pos_setpoint is initialized in start_closed_loop_control
+     vel_setpoint_ = 0.0f;
+     vel_integrator_torque_ = 0.0f;
+@@ -377,7 +378,21 @@ bool Controller::update() {
+             return false;
+         }
+ 
+-        v_err = vel_des - *vel_estimate;
++        float velocity_feedback = *vel_estimate;
++#ifdef MRBOBUS_HALL_COMPENSATION
++        // Only the identified Hall30/60CPR velocity-control plant is supported.
++        // Do not change raw feedback used by overspeed/spinout or FOC phase.
++        const auto& enc = axis_->encoder_.config_;
++        if (config_.control_mode == CONTROL_MODE_VELOCITY_CONTROL
++                && enc.mode == Encoder::MODE_HALL && enc.cpr == 60
++                && std::abs(enc.bandwidth - 30.0f) < 0.001f
++                && config_.load_encoder_axis == axis_->axis_num_) {
++            velocity_feedback = hall_velocity_compensator_.update(velocity_feedback, current_meas_period);
++        } else {
++            hall_velocity_compensator_.reset();
++        }
++#endif
++        v_err = vel_des - velocity_feedback;
+         torque += (vel_gain * gain_scheduling_multiplier) * v_err;
+ 
+         // Velocity integral action before limiting
+diff --git a/Firmware/MotorControl/controller.hpp b/Firmware/MotorControl/controller.hpp
+index 2b78d6c..95f5a52 100644
+--- a/Firmware/MotorControl/controller.hpp
++++ b/Firmware/MotorControl/controller.hpp
+@@ -1,5 +1,6 @@
+ #ifndef __CONTROLLER_HPP
+ #define __CONTROLLER_HPP
++#include "hall_velocity_compensator.hpp"
+ 
+ class Controller : public ODriveIntf::ControllerIntf {
+ public:
+@@ -107,6 +108,7 @@ public:
+     float vel_setpoint_ = 0.0f; // [turn/s]
+     // float vel_setpoint = 800.0f; <sensorless example>
+     float vel_integrator_torque_ = 0.0f;    // [Nm]
++    HallVelocityCompensator hall_velocity_compensator_;
+     float torque_setpoint_ = 0.0f;  // [Nm]
+ 
+     float input_pos_ = 0.0f;     // [turns]
+diff --git a/Firmware/Tupfile.lua b/Firmware/Tupfile.lua
+index 4158616..4a01975 100644
+--- a/Firmware/Tupfile.lua
++++ b/Firmware/Tupfile.lua
+@@ -360,6 +360,9 @@ LDFLAGS += '-Wl,--undefined=uxTopUsedPriority'
+ 
+ 
+ -- Handle Configuration Options ------------------------------------------------
++if tup.getconfig("MRBOBUS_HALL_COMPENSATION") == "true" then
++    CFLAGS += '-DMRBOBUS_HALL_COMPENSATION=1'
++end
+ 
+ -- Switch between board versions
+ boardversion = tup.getconfig("BOARD_VERSION")
+diff --git a/Firmware/MotorControl/hall_velocity_compensator.hpp b/Firmware/MotorControl/hall_velocity_compensator.hpp
+new file mode 100644
+index 0000000..8bd12c9
+--- /dev/null
++++ b/Firmware/MotorControl/hall_velocity_compensator.hpp
+@@ -0,0 +1,27 @@
++#pragma once
++
++// Experimental mrbobus loop shaping, fw-v0.5.6 only.
++// F(s)=(1.2*s^2+46.6*s+550)/(s^2+115*s+550).
++// Parallel first-order realization avoids ill-conditioned biquad DC sums.
++// This changes velocity feedback ONLY, never phase or safety measurements.
++class HallVelocityCompensator {
++public:
++    void reset() { initialized_ = false; }
++    float update(float input, float dt) {
++        if (!initialized_) {
++            slow_ = fast_ = previous_ = input;
++            initialized_ = true;
++        }
++        const float slow_b = (5.0f * dt) / (2.0f + 5.0f * dt);
++        const float fast_b = (110.0f * dt) / (2.0f + 110.0f * dt);
++        slow_ += slow_b * (input + previous_ - 2.0f * slow_);
++        fast_ += fast_b * (input + previous_ - 2.0f * fast_);
++        previous_ = input;
++        // 1.2 + (347/525)*LP5 - (452/525)*LP110; DC gain exactly one.
++        return input + 0.660952381f * (slow_ - input)
++                     - 0.860952381f * (fast_ - input);
++    }
++private:
++    bool initialized_ = false;
++    float slow_ = 0.0f, fast_ = 0.0f, previous_ = 0.0f;
++};

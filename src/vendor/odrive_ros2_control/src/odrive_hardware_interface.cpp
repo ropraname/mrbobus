@@ -124,7 +124,7 @@ CallbackReturn ODriveHardwareInterface::on_init(const hardware_interface::Hardwa
             if(gain!=joint.parameters.end() && integrator!=joint.parameters.end()) {
                 axis.vel_gain=std::stod(gain->second);
                 axis.vel_integrator_gain=std::stod(integrator->second);
-                if(!std::isfinite(axis.vel_gain) || axis.vel_gain<0. || axis.vel_gain>1. ||
+                if(!std::isfinite(axis.vel_gain) || axis.vel_gain<0. || axis.vel_gain>2. ||
                    !std::isfinite(axis.vel_integrator_gain) || axis.vel_integrator_gain<0. || axis.vel_integrator_gain>2.)
                     throw std::runtime_error("Invalid velocity gains");
             }
@@ -250,7 +250,10 @@ return_type ODriveHardwareInterface::perform_command_mode_switch(
     for(auto& a:axes_) {
         a.command=0.; a.position_valid=false;
         Set_Input_Vel_msg_t zero; zero.Input_Vel=0.; zero.Input_Torque_FF=0.;
-        Set_Limits_msg_t limits; limits.Velocity_Limit=2.; limits.Current_Limit=current_limit_;
+        // Command cap stays below 2.23 rev/s (floor profile). Allow transient
+        // unloaded-wheel/rough-ground feedback above that without disabling
+        // the firmware overspeed protection.
+        Set_Limits_msg_t limits; limits.Velocity_Limit=3.; limits.Current_Limit=current_limit_;
         Set_Controller_Mode_msg_t mode; mode.Control_Mode=CONTROL_MODE_VELOCITY_CONTROL; mode.Input_Mode=INPUT_MODE_PASSTHROUGH;
         Clear_Errors_msg_t clear; clear.Identify=0;
         if(a.vel_gain>=0.) {
@@ -272,8 +275,12 @@ return_type ODriveHardwareInterface::read(const rclcpp::Time&,const rclcpp::Dura
     if(!connected_ || fault_) return return_type::ERROR;
     drain();
     if(!can_.healthy()) return fail("CAN receive failure");
-    if(std::any_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.commanded;}) && !stop_ready())
-        return fail("STOP button latched or flag unavailable");
+    if(std::any_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.commanded;}) && !stop_ready()) {
+        // A requested stop is not a hardware fault. Drop all motor enables,
+        // but retain the configured CAN owner for an explicit controller switch.
+        // Restoring the flag alone cannot rearm: idle_all clears commanded.
+        return idle_all() ? return_type::OK : fail("CAN failure applying STOP");
+    }
     double now=now_s();
     for(const auto& a:axes_) {
         if(!fresh(a,now)) return fail("Stale feedback on axis "+std::to_string(a.node_id));
@@ -293,7 +300,7 @@ return_type ODriveHardwareInterface::write(const rclcpp::Time&,const rclcpp::Dur
     if(fault_) return return_type::ERROR;
     if(!active_) return return_type::OK;
     if(std::any_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.commanded;}) && !stop_ready())
-        return fail("STOP button latched or flag unavailable");
+        return idle_all() ? return_type::OK : fail("CAN failure applying STOP");
     bool ready=std::all_of(axes_.begin(),axes_.end(),[](const Axis& a){return a.state==AXIS_STATE_CLOSED_LOOP_CONTROL && a.error==0;});
     for(const auto& a:axes_) if(a.commanded && (!std::isfinite(a.command) || std::abs(a.command)>max_velocity_+1e-6))
         return fail("Non-finite or excessive wheel velocity");
