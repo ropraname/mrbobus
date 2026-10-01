@@ -1131,3 +1131,7 @@ prediction and controller patience exceeded. Not a successful full autonomous ru
 Added offline-only Python test entrypoint and CI; no robot service or motor command
 was run for publication. Existing ROS-dependent tests remain separate. Working
 files and301historical Git blobs scanned for credential patterns; no matches.
+
+### Визуальные материалы — 1 октября 2026
+
+README дополнен видом сборки из Fusion, постером и фотографией робота на полигоне. 3D-иллюстрация построена из сохранённого облака и траектории 28 сентября; её обрезка не изменяет навигационную карту. В описание добавлена заявленная мощность мотор-колёс: 4 × 600 Вт, управление двумя ODrive. Код и настройки робота не менялись.
